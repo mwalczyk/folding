@@ -58,14 +58,30 @@ impl Mesh {
         normals: Option<&Vec<Vector3<f32>>>,
         texcoords: Option<&Vec<Vector2<f32>>>,
     ) -> Mesh {
+        // TODO: this seems silly...glium just has a series of bools like `has_colors`
+        let colors = match colors {
+            Some(data) => Some(data.clone()),
+            _ => None,
+        };
+
+        let normals = match normals {
+            Some(data) => Some(data.clone()),
+            _ => None,
+        };
+
+        let texcoords = match texcoords {
+            Some(data) => Some(data.clone()),
+            _ => None,
+        };
+
         let mut mesh = Mesh {
             vao: 0,
             vbo: 0,
             vertex_data: vec![],
             positions: positions.clone(),
-            colors: None,
-            normals: None,
-            texcoords: None,
+            colors,
+            normals,
+            texcoords,
         };
 
         mesh.allocate();
