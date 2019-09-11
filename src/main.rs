@@ -138,15 +138,20 @@ struct Model {
     // The surface areas of all of the faces of this model
     areas: Vec<f32>,
 
-    k_facet: f32, // 0.7
+    // The stiffness coefficient along facet creases
+    k_facet: f32,
 
-    k_fold: f32, // 0.7
+    // The stiffness coefficient along foldable (M or V) creases
+    k_fold: f32,
 
-    ea: f32, // 20.0
+    // Young's constant
+    ea: f32,
 
-    zeta: f32, // 0.1
+    // A multiplier that strengthens or weakens the axial forces
+    zeta: f32,
 
-    iterations: usize, // 1
+    // The number of steps (per frame) of the physics simulation
+    iterations: usize,
 
     mesh: Mesh,
 }
