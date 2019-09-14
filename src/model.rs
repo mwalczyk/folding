@@ -4,10 +4,10 @@ use cgmath::{InnerSpace, Vector3, Zero};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
+use std::hash::Hash;
 use std::io::prelude::*;
 use std::path::Path;
 use std::str::FromStr;
-use std::hash::Hash;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct FoldSpecification {
@@ -96,6 +96,12 @@ impl FromStr for Assignment {
     }
 }
 
+struct HalfEdge {
+    indices: [usize; 2],
+    nominal_length: f32,
+    faces: [usize; 3],
+}
+
 type Vertex = Vector3<f32>;
 type Edge = [usize; 2];
 type Face = [usize; 3];
@@ -135,6 +141,9 @@ pub struct Model {
     // The surface areas of all of the faces of this model
     areas: Vec<f32>,
 
+    // The mass of each vertex of this model
+    masses: Vec<f32>,
+
     // The stiffness coefficient along facet creases
     k_facet: f32,
 
@@ -152,6 +161,7 @@ pub struct Model {
 
     timestep: f32,
 
+    forces: Vec<Vector3<f32>>,
     positions: Vec<Vector3<f32>>,
     velocities: Vec<Vector3<f32>>,
     accelerations: Vec<Vector3<f32>>,
@@ -221,7 +231,6 @@ impl Model {
 
         // Create neighborhood map
         for edge_indices in edges.iter() {
-
             if let Some(v) = neighbors.get_mut(&edge_indices[0]) {
                 v.insert(edge_indices[1]);
             } else {
@@ -234,11 +243,6 @@ impl Model {
                 neighbors.insert(edge_indices[1], HashSet::new());
             }
         }
-
-        // Calculate vertex masses
-        let masses = vec![1.0; vertices.len()];
-        let masses_min = 1.0; // TODO
-        println!("Vertex with the smallest mass ({} units)\n", masses_min);
 
         // Calculate the target angle of each crease
         for assignment in assignments.iter() {
@@ -259,6 +263,10 @@ impl Model {
             last_angles.push(0.0);
         }
 
+        // Calculate vertex masses
+        let masses_min = 1.0; // TODO
+        println!("Vertex with the smallest mass ({} units)\n", masses_min);
+
         // Calculate nominal (rest) lengths for each edge
         let mut omega_max = 0.0;
         for edge_indices in edges.iter() {
@@ -271,7 +279,6 @@ impl Model {
             axial_coefficients.push(k_axial);
 
             let omega = (k_axial / masses_min).sqrt();
-
             if omega > omega_max {
                 omega_max = omega;
             }
@@ -283,7 +290,6 @@ impl Model {
         println!("Setting simulation timestep to {}\n", timestep);
 
         // Some extra sanity checks
-        assert_eq!(vertices.len(), masses.len());
         assert_eq!(edges.len(), assignments.len());
         assert_eq!(edges.len(), last_angles.len());
         assert_eq!(edges.len(), target_angles.len());
@@ -318,6 +324,8 @@ impl Model {
         // Set initial physics params
         let normals = vec![Vector3::zero(); faces.len()];
         let areas = vec![0.0; faces.len()];
+        let masses = vec![1.0; vertices.len()];
+        let forces = vec![Vector3::zero(); vertices.len()];
         let positions = vertices.clone();
         let velocities = vec![Vector3::zero(); vertices.len()];
         let accelerations = vec![Vector3::zero(); vertices.len()];
@@ -334,22 +342,48 @@ impl Model {
             axial_coefficients,
             normals,
             areas,
+            masses,
             k_facet,
             k_fold,
             ea,
             zeta,
             iterations,
             timestep,
+            forces,
             positions,
             velocities,
             accelerations,
             mesh,
-            ..Default::default()
         }
     }
 
-    fn update_mesh(&mut self) {
-        self.mesh.set_positions(&self.positions);
+    fn draw_mesh(&self) {
+        unimplemented!();
+    }
+
+    fn draw_normals(&self) {
+        unimplemented!();
+    }
+
+    pub fn step_simulation(&mut self) {
+        for _ in 0..self.iterations {
+            // Reset forces
+            self.forces = vec![Vector3::zero(); self.vertices.len()];
+
+            // First, calculate new face normals / areas
+            self.update_face_data();
+
+            // Apply 3 different types of forces
+            self.apply_axial_constraints();
+            self.apply_crease_constraints();
+            self.apply_face_constraints();
+
+            // Integrate accelerations, velocities, and positions
+            self.integrate();
+        }
+
+        // Send new position data to the GPU
+        self.update_mesh();
     }
 
     fn update_face_data(&mut self) {
@@ -380,22 +414,11 @@ impl Model {
         }
     }
 
-    pub fn step_simulation(&mut self) {
-        // First, calculate new face normals / areas
-        self.update_face_data();
-
-        // Then, step the physics simulation
-        for _ in 0..self.iterations {
-            self.apply_axial_constraints();
-        }
-
-        // Send new position data to the GPU
-        self.update_mesh();
+    fn update_mesh(&mut self) {
+        self.mesh.set_positions(&self.positions);
     }
 
     fn apply_axial_constraints(&mut self) {
-        let mut forces = vec![Vector3::zero(); self.vertices.len()];
-
         for (vertex_index, vertex) in self.vertices.iter().enumerate() {
             let mut force_axial = Vector3::zero();
             let mut force_damping = Vector3::zero();
@@ -405,9 +428,13 @@ impl Model {
                 let axial_indices = [vertex_index, *neighbor_index];
 
                 // The index of the edge above within the model's list of edges
-                let pos = self.edges.iter().position(|&edge_indices| edge_indices == axial_indices).unwrap();
+                let pos = self
+                    .edges
+                    .iter()
+                    .position(|&edge_indices| edge_indices == axial_indices)
+                    .unwrap();
                 // TODO: `pos` above probably needs to be sorted
-                
+
                 let mut direction = *vertex - self.vertices[*neighbor_index];
                 let l = direction.magnitude();
                 let l_0 = self.nominal_lengths[pos];
@@ -418,16 +445,27 @@ impl Model {
                 force_axial += -k_axial * (l - l_0) * direction;
 
                 // Accumulate damping force
-                let c = 2.0 * self.zeta * (k_axial * 1.0).sqrt(); // TODO: the `1.0` here should be a mass
-                force_damping += c * (self.velocities[*neighbor_index] - self.velocities[vertex_index]);
+                let c = 2.0 * self.zeta * (k_axial * self.masses[vertex_index]).sqrt();
+                force_damping +=
+                    c * (self.velocities[*neighbor_index] - self.velocities[vertex_index]);
             }
 
             // Accumulate both forces calculated above in the inner for-loop
-            forces[vertex_index] += force_axial + force_damping;
+            self.forces[vertex_index] += force_axial + force_damping;
         }
+    }
 
+    fn apply_crease_constraints(&mut self) {
+        unimplemented!();
+    }
+
+    fn apply_face_constraints(&mut self) {
+        unimplemented!();
+    }
+
+    fn integrate(&mut self) {
         for (vertex_index, a) in self.accelerations.iter_mut().enumerate() {
-            *a = forces[vertex_index] / 1.0; // TODO: again, this should be a mass
+            *a = self.forces[vertex_index] / self.masses[vertex_index];
             *a *= self.timestep;
         }
 

@@ -3,6 +3,7 @@ extern crate glutin;
 extern crate serde;
 
 mod graphics;
+mod half_edge;
 mod model;
 
 use crate::graphics::mesh::Mesh;
@@ -79,7 +80,7 @@ fn main() {
             }
         }
 
-        model.step_simulation();
+        //model.step_simulation();
 
         unsafe {
             // Clear the screen to black
