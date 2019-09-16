@@ -1,4 +1,5 @@
 use crate::graphics::mesh::Mesh;
+use crate::half_edge::HalfEdgeMesh;
 
 use cgmath::{InnerSpace, Vector3, Zero};
 use serde::{Deserialize, Serialize};
@@ -329,6 +330,8 @@ impl Model {
         let positions = vertices.clone();
         let velocities = vec![Vector3::zero(); vertices.len()];
         let accelerations = vec![Vector3::zero(); vertices.len()];
+
+        let hem = HalfEdgeMesh::from_faces(&faces, &vertices);
 
         Model {
             vertices,
