@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 extern crate gl;
 extern crate glutin;
 extern crate serde;
@@ -23,6 +24,7 @@ fn set_draw_state() {
         gl::Enable(gl::DEPTH_TEST);
         gl::DepthFunc(gl::LESS);
 
+        // Set to wireframe rendering
         gl::PolygonMode(gl::FRONT_AND_BACK, gl::LINE);
     }
 }
@@ -82,7 +84,7 @@ fn main() {
             }
         }
 
-        //model.step_simulation();
+        model.step_simulation();
 
         unsafe {
             // Clear the screen to black
