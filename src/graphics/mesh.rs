@@ -1,8 +1,7 @@
-use cgmath::{EuclideanSpace, InnerSpace, Matrix3, Point3, Vector2, Vector3, Zero};
+use cgmath::{Vector2, Vector3};
 use gl;
 use gl::types::*;
 use std::mem;
-use std::ptr;
 
 pub enum Attribute {
     POSITIONS,

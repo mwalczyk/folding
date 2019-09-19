@@ -2,7 +2,7 @@ use gl;
 use gl::types::*;
 
 use cgmath;
-use cgmath::{Array, Matrix, Matrix4, Vector2, Vector3, Vector4};
+use cgmath::{Array, Matrix};
 
 use std::ffi::CString;
 use std::ptr;

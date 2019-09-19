@@ -223,7 +223,7 @@ impl HalfEdgeMesh {
         }
 
         // Create vertices: we do this separately so that each vertex is only added once
-        for (base_vertex_index, base_vertex) in base_vertices.iter().enumerate() {
+        for (base_vertex_index, _base_vertex) in base_vertices.iter().enumerate() {
             for (half_edge_index, half_edge) in half_edges.iter().enumerate() {
                 // Is this a half-edge that originates from this vertex?
                 if base_vertex_index == half_edge.origin_vertex_id.0 {
@@ -319,7 +319,7 @@ impl HalfEdgeMesh {
     pub fn gather_triangles(&self) -> Vec<Vector3<f32>> {
         let mut triangles = vec![];
 
-        for (i, &f) in self.faces.iter().enumerate() {
+        for (i, &_) in self.faces.iter().enumerate() {
             let indices = self.get_adjacent_vertices_to_face(FaceIndex(i));
             let coordinates: Vec<_> = indices
                 .iter()
@@ -371,6 +371,10 @@ impl HalfEdgeMesh {
     /// Returns the vertex at `index`.
     pub fn get_vertex(&self, index: VertexIndex) -> &Vertex {
         &self.vertices[index.0]
+    }
+
+    pub fn get_vertex_mut(&mut self, index: VertexIndex) -> &mut Vertex {
+        &mut self.vertices[index.0]
     }
 
     /// Returns the face at `index`.

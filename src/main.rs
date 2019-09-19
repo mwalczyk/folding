@@ -2,17 +2,17 @@ extern crate gl;
 extern crate glutin;
 extern crate serde;
 
+mod fold_specification;
 mod graphics;
 mod half_edge;
 mod model;
 
-use crate::graphics::mesh::Mesh;
+use crate::fold_specification::FoldSpecification;
 use crate::graphics::program::Program;
 use crate::graphics::utils;
-use crate::model::{FoldSpecification, Model};
+use crate::model::Model;
 
-use cgmath::{EuclideanSpace, InnerSpace, Matrix4, Point3, SquareMatrix, Vector3, Zero};
-use gl::types::*;
+use cgmath::{EuclideanSpace, Matrix4, Point3, SquareMatrix, Vector3};
 use glutin::dpi::LogicalSize;
 use std::path::Path;
 

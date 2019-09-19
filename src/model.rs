@@ -1,66 +1,15 @@
+use crate::fold_specification::FoldSpecification;
 use crate::graphics::mesh::Mesh;
 use crate::half_edge::HalfEdgeMesh;
 
 use cgmath::{InnerSpace, Vector3, Zero};
-use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::fs::File;
-use std::hash::Hash;
-use std::io::prelude::*;
-use std::path::Path;
+
+
+
 use std::str::FromStr;
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct FoldSpecification {
-    #[serde(default)]
-    file_spec: i32,
 
-    #[serde(default)]
-    file_creator: String,
-
-    #[serde(default)]
-    file_author: String,
-
-    #[serde(default)]
-    frame_title: String,
-
-    #[serde(default)]
-    frame_classes: Vec<String>,
-
-    #[serde(default)]
-    frame_attributes: Vec<String>,
-
-    #[serde(default)]
-    frame_unit: String,
-
-    #[serde(rename(deserialize = "vertices_coords"))]
-    vertices: Vec<Vec<f32>>,
-
-    #[serde(rename(deserialize = "edges_vertices"))]
-    edges: Vec<Vec<i32>>,
-
-    #[serde(rename(deserialize = "edges_assignment"))]
-    assignments: Vec<String>,
-
-    #[serde(rename(deserialize = "faces_vertices"))]
-    faces: Vec<Vec<i32>>,
-
-    // Renamed and removed all occurrences of `null` -> replaced with `10.0`
-    #[serde(rename(deserialize = "edges_foldAngles"))]
-    fold_angles: Vec<f32>,
-}
-
-impl FoldSpecification {
-    pub fn from_file(path: &Path) -> std::io::Result<FoldSpecification> {
-        let mut file = File::open(path)?;
-        let mut contents = String::new();
-        file.read_to_string(&mut contents)?;
-
-        let spec: FoldSpecification = serde_json::from_str(&contents).expect("Failed to load JSON");
-
-        Ok(spec)
-    }
-}
 
 type Color = Vector3<f32>;
 
@@ -396,7 +345,7 @@ impl Model {
             let p0 = self.get_vertex(face_indices[0]);
             let p1 = self.get_vertex(face_indices[1]);
             let p2 = self.get_vertex(face_indices[2]);
-            let centroid = (*p0 + *p1 + *p2) / 3.0;
+            let _centroid = (*p0 + *p1 + *p2) / 3.0;
 
             let mut u = *p1 - *p0;
             let mut v = *p2 - *p0;
