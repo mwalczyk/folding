@@ -44,19 +44,19 @@ pub struct FaceIndex(usize);
 #[derive(Clone, Copy, Debug)]
 pub struct HalfEdge {
     // The ID of the previous half-edge
-    pub prev_id: HalfEdgeIndex,
+    prev_id: HalfEdgeIndex,
 
     // The ID of the next half-edge
-    pub next_id: HalfEdgeIndex,
+    next_id: HalfEdgeIndex,
 
     // The ID of the half-edge that runs parallel to this one but in the opposite direction
-    pub pair_id: HalfEdgeIndex,
+    pair_id: HalfEdgeIndex,
 
     // The ID of the vertex from which this half-edge originates
-    pub origin_vertex_id: VertexIndex,
+    origin_vertex_id: VertexIndex,
 
     // The ID of the face that is adjacent to this half-edge
-    pub face_id: Option<FaceIndex>,
+    face_id: Option<FaceIndex>,
 }
 
 impl HalfEdge {
@@ -68,6 +68,26 @@ impl HalfEdge {
             origin_vertex_id: VertexIndex(0),
             face_id: None,
         }
+    }
+
+    pub fn get_prev(&self) -> HalfEdgeIndex {
+        self.prev_id
+    }
+
+    pub fn get_next(&self) -> HalfEdgeIndex {
+        self.next_id
+    }
+
+    pub fn get_pair(&self) -> HalfEdgeIndex {
+        self.pair_id
+    }
+
+    pub fn get_origin_vertex(&self) -> VertexIndex {
+        self.origin_vertex_id
+    }
+
+    pub fn get_face(&self) -> Option<FaceIndex> {
+        self.face_id
     }
 }
 
@@ -274,6 +294,44 @@ impl HalfEdgeMesh {
         })
     }
 
+    /// This function is primarily used to render the half-edge mesh (as in an OpenGL program).
+    pub fn gather_triangles(&self) -> Vec<Vector3<f32>> {
+        let mut triangles = vec![];
+
+        for (i, &f) in self.faces.iter().enumerate() {
+            let indices = self.get_all_vertices_adjacent_to_face(FaceIndex(i));
+            let coordinates: Vec<_> = indices
+                .iter()
+                .map(|&i| self.get_vertex(i).coordinates)
+                .collect();
+
+            triangles.extend_from_slice(&coordinates);
+        }
+
+        triangles
+    }
+
+//    /// Returns the vertex indices corresponding to each half-edge as a list. This function is primarily
+//    /// used to render the half-edge mesh (as in an OpenGL program).
+//    pub fn gather_edge_indices(&self) -> Vec<[VertexIndex; 2]> {
+//        self.half_edges
+//            .iter()
+//            .enumerate()
+//            .map(|(i, &he)| self.get_adjacent_vertices_to_half_edge(HalfEdgeIndex(i)))
+//            .collect()
+//    }
+//
+//    /// Returns the coordinates of all of the vertices that make up this half-edge mesh as a list. This function
+//    /// is primarily used to render the half-edge mesh (as in an OpenGL program).
+//    pub fn gather_vertex_coordinates(&self) -> Vec<Vector3<f32>> {
+//        self.vertices.iter().map(|&v| v.coordinates).collect()
+//    }
+
+    /// Returns an immutable reference to all of the half-edges that make up this mesh.
+    pub fn get_half_edges(&self) -> &Vec<HalfEdge> {
+        &self.half_edges
+    }
+
     /// Returns the half-edge at `index`.
     pub fn get_half_edge(&self, index: HalfEdgeIndex) -> &HalfEdge {
         &self.half_edges[index.0]
@@ -293,7 +351,7 @@ impl HalfEdgeMesh {
     /// i.e. the two vertices that form this particular edge).
     ///
     /// Reference: `http://www.sccg.sk/~samuelcik/dgs/half_edge.pdf`
-    pub fn get_adjacent_vertices(&self, index: HalfEdgeIndex) -> [VertexIndex; 2] {
+    pub fn get_adjacent_vertices_to_half_edge(&self, index: HalfEdgeIndex) -> [VertexIndex; 2] {
         // Returns:
         // [0] edge -> vertex
         // [1] edge -> pair -> vertex
@@ -305,7 +363,7 @@ impl HalfEdgeMesh {
     }
 
     /// Returns the indices of the two faces that are adjacent to this half-edge.
-    pub fn get_adjacent_faces(&self, index: HalfEdgeIndex) -> [Option<FaceIndex>; 2] {
+    pub fn get_adjacent_faces_to_half_edge(&self, index: HalfEdgeIndex) -> [Option<FaceIndex>; 2] {
         // Returns:
         // [0] edge -> face
         // [1] edge -> pair -> face
@@ -317,7 +375,7 @@ impl HalfEdgeMesh {
     }
 
     /// Returns the indices of all half-edges that originate from the vertex at `index`.
-    pub fn get_all_edges_adjacent_to(&self, index: VertexIndex) -> Vec<HalfEdgeIndex> {
+    pub fn get_all_edges_adjacent_to_vertex(&self, index: VertexIndex) -> Vec<HalfEdgeIndex> {
         let vertex = self.get_vertex(index);
         let start = vertex.half_edge_id;
         let mut current = start;
@@ -337,6 +395,40 @@ impl HalfEdgeMesh {
         }
 
         indices
+    }
+
+    /// Returns the indices of all half-edges that bound (i.e. surround) the face at `index`.
+    /// The half-edge indices returned are guaranteed to be in a counter-clockwise winding order,
+    /// but there are no other guarantees about the order of the indices (i.e. they may not be
+    /// sorted from lowest to highest index, for example).
+    pub fn get_all_edges_adjacent_to_face(&self, index: FaceIndex) -> Vec<HalfEdgeIndex> {
+        let face = self.get_face(index);
+        let start = face.half_edge_id;
+        let mut current = start;
+
+        let mut indices = vec![current];
+
+        loop {
+            // Get the current half-edge's next
+            current = self.get_half_edge(current).next_id;
+            if current == start {
+                break;
+            }
+
+            indices.push(current);
+        }
+
+        indices
+    }
+
+    /// Returns the indices of all of the vertices that bound (i.e. surround) the face at `index`.
+    pub fn get_all_vertices_adjacent_to_face(&self, index: FaceIndex) -> Vec<VertexIndex> {
+        let half_edges = self.get_all_edges_adjacent_to_face(index);
+
+        half_edges
+            .iter()
+            .map(|&i| self.get_half_edge(i).origin_vertex_id)
+            .collect()
     }
 }
 
@@ -397,28 +489,75 @@ mod tests {
 
         // Test adjacency query on a particular vertex: note that we sort the array before any
         // assertions, since we don't know what order the indices will be in
-        let mut adjacent_0 = half_edge_mesh.get_all_edges_adjacent_to(VertexIndex(0));
-        let mut adjacent_1 = half_edge_mesh.get_all_edges_adjacent_to(VertexIndex(1));
-        let mut adjacent_2 = half_edge_mesh.get_all_edges_adjacent_to(VertexIndex(2));
-        let mut adjacent_3 = half_edge_mesh.get_all_edges_adjacent_to(VertexIndex(3));
-        adjacent_0.sort();
-        adjacent_1.sort();
-        adjacent_2.sort();
-        adjacent_3.sort();
+        let mut adjacent_to_vertex_0 =
+            half_edge_mesh.get_all_edges_adjacent_to_vertex(VertexIndex(0));
+        let mut adjacent_to_vertex_1 =
+            half_edge_mesh.get_all_edges_adjacent_to_vertex(VertexIndex(1));
+        let mut adjacent_to_vertex_2 =
+            half_edge_mesh.get_all_edges_adjacent_to_vertex(VertexIndex(2));
+        let mut adjacent_to_vertex_3 =
+            half_edge_mesh.get_all_edges_adjacent_to_vertex(VertexIndex(3));
+        adjacent_to_vertex_0.sort();
+        adjacent_to_vertex_1.sort();
+        adjacent_to_vertex_2.sort();
+        adjacent_to_vertex_3.sort();
         assert_eq!(
             vec![HalfEdgeIndex(0), HalfEdgeIndex(3), HalfEdgeIndex(9)],
-            adjacent_0
+            adjacent_to_vertex_0
         );
-        assert_eq!(vec![HalfEdgeIndex(1), HalfEdgeIndex(6)], adjacent_1);
+        assert_eq!(
+            vec![HalfEdgeIndex(1), HalfEdgeIndex(6)],
+            adjacent_to_vertex_1
+        );
         assert_eq!(
             vec![HalfEdgeIndex(2), HalfEdgeIndex(4), HalfEdgeIndex(7)],
-            adjacent_2
+            adjacent_to_vertex_2
         );
-        assert_eq!(vec![HalfEdgeIndex(5), HalfEdgeIndex(8)], adjacent_3);
-        println!("Half-edges adjacent to vertex #0: {:?}", adjacent_0);
-        println!("Half-edges adjacent to vertex #1: {:?}", adjacent_1);
-        println!("Half-edges adjacent to vertex #2: {:?}", adjacent_2);
-        println!("Half-edges adjacent to vertex #3: {:?}", adjacent_3);
+        assert_eq!(
+            vec![HalfEdgeIndex(5), HalfEdgeIndex(8)],
+            adjacent_to_vertex_3
+        );
+        println!(
+            "Half-edges adjacent to vertex #0: {:?}",
+            adjacent_to_vertex_0
+        );
+        println!(
+            "Half-edges adjacent to vertex #1: {:?}",
+            adjacent_to_vertex_1
+        );
+        println!(
+            "Half-edges adjacent to vertex #2: {:?}",
+            adjacent_to_vertex_2
+        );
+        println!(
+            "Half-edges adjacent to vertex #3: {:?}",
+            adjacent_to_vertex_3
+        );
+
+        // Test adjacency queries on a particular face
+        let mut adjacent_to_face_0 = half_edge_mesh.get_all_edges_adjacent_to_face(FaceIndex(0));
+        let mut adjacent_to_face_1 = half_edge_mesh.get_all_edges_adjacent_to_face(FaceIndex(1));
+        assert_eq!(
+            vec![HalfEdgeIndex(0), HalfEdgeIndex(1), HalfEdgeIndex(2)],
+            adjacent_to_face_0
+        );
+        assert_eq!(
+            vec![HalfEdgeIndex(3), HalfEdgeIndex(4), HalfEdgeIndex(5)],
+            adjacent_to_face_1
+        );
+
+        let mut vertices_around_face_0 =
+            half_edge_mesh.get_all_vertices_adjacent_to_face(FaceIndex(0));
+        let mut vertices_around_face_1 =
+            half_edge_mesh.get_all_vertices_adjacent_to_face(FaceIndex(1));
+        assert_eq!(
+            vec![VertexIndex(0), VertexIndex(1), VertexIndex(2)],
+            vertices_around_face_0
+        );
+        assert_eq!(
+            vec![VertexIndex(0), VertexIndex(2), VertexIndex(3)],
+            vertices_around_face_1
+        );
 
         // Test faces along interior edges
         assert_eq!(
@@ -451,5 +590,8 @@ mod tests {
         assert_eq!(None, half_edge_mesh.get_half_edge(HalfEdgeIndex(7)).face_id);
         assert_eq!(None, half_edge_mesh.get_half_edge(HalfEdgeIndex(8)).face_id);
         assert_eq!(None, half_edge_mesh.get_half_edge(HalfEdgeIndex(9)).face_id);
+
+        // Test gather methods
+        println!("\n{:?}", half_edge_mesh.gather_edge_indices());
     }
 }

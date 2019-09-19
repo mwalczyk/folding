@@ -22,6 +22,8 @@ fn set_draw_state() {
         // Turn on depth testing
         gl::Enable(gl::DEPTH_TEST);
         gl::DepthFunc(gl::LESS);
+
+        gl::PolygonMode(gl::FRONT_AND_BACK, gl::LINE);
     }
 }
 
@@ -87,7 +89,7 @@ fn main() {
             gl::ClearColor(0.12, 0.1, 0.1, 1.0);
             gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
 
-            model.mesh.draw(gl::LINES);
+            model.draw_mesh();
         }
 
         gl_window.swap_buffers().unwrap();

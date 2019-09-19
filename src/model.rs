@@ -97,17 +97,10 @@ impl FromStr for Assignment {
     }
 }
 
-struct HalfEdge {
-    indices: [usize; 2],
-    nominal_length: f32,
-    faces: [usize; 3],
-}
-
 type Vertex = Vector3<f32>;
 type Edge = [usize; 2];
 type Face = [usize; 3];
 
-#[derive(Default)]
 pub struct Model {
     // The vertices of this model
     vertices: Vec<Vertex>,
@@ -167,8 +160,11 @@ pub struct Model {
     velocities: Vec<Vector3<f32>>,
     accelerations: Vec<Vector3<f32>>,
 
+    // The CPU-side half-edge mesh representation used for adjacency queries
+    half_edge_mesh: HalfEdgeMesh,
+
     // The render-able mesh
-    pub mesh: Mesh,
+    renderable_mesh: Mesh,
 }
 
 impl Model {
@@ -320,7 +316,7 @@ impl Model {
             colors.push(assignment.get_color());
             colors.push(assignment.get_color());
         }
-        let mesh = Mesh::new(&positions, Some(&colors), None, None);
+
 
         // Set initial physics params
         let normals = vec![Vector3::zero(); faces.len()];
@@ -331,7 +327,9 @@ impl Model {
         let velocities = vec![Vector3::zero(); vertices.len()];
         let accelerations = vec![Vector3::zero(); vertices.len()];
 
-        let hem = HalfEdgeMesh::from_faces(&faces, &vertices);
+        // TODO: let mesh = Mesh::new(&positions, Some(&colors), None, None);
+        let half_edge_mesh = HalfEdgeMesh::from_faces(&faces, &vertices).unwrap();
+        let renderable_mesh = Mesh::new(&half_edge_mesh.gather_triangles(), None, None, None);
 
         Model {
             vertices,
@@ -356,15 +354,17 @@ impl Model {
             positions,
             velocities,
             accelerations,
-            mesh,
+            half_edge_mesh,
+            renderable_mesh,
         }
     }
 
-    fn draw_mesh(&self) {
-        unimplemented!();
+    pub fn draw_mesh(&mut self) {
+        self.mesh.set_positions(&self.half_edge_mesh.gather_triangles());
+        self.mesh.draw(gl::TRIANGLES);
     }
 
-    fn draw_normals(&self) {
+    pub fn draw_normals(&self) {
         unimplemented!();
     }
 
