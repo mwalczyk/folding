@@ -115,25 +115,33 @@ impl HalfEdgeMesh {
     pub fn from_faces(
         base_faces: &Vec<[usize; 3]>,
         base_vertices: &Vec<Vector3<f32>>,
-    ) -> HalfEdgeMesh {
-        println!("Building half-edges from {} faces and {} vertices", base_faces.len(), base_vertices.len());
+    ) -> Result<HalfEdgeMesh, &'static str> {
+        println!(
+            "Building half-edges from {} faces and {} vertices",
+            base_faces.len(),
+            base_vertices.len()
+        );
         let mut half_edges = vec![];
         let mut vertices = vec![];
         let mut faces = vec![];
 
         for (face_index, face_indices) in base_faces.iter().enumerate() {
+            println!("Examining face {:?}", face_indices);
             for (edge_index, edge_indices) in get_edge_indices_for_face_indices(face_indices)
                 .iter()
                 .enumerate()
             {
                 // Create a new half-edge for each existing edge of this face (there should always be 3)
-                println!("Examining edge {:?}", edge_indices);
-                assert!(edge_index < 3);
+                println!("\tExamining edge {:?}", edge_indices);
+                if edge_index > 2 {
+                    return Err("Found face with more than 3 edges: triangulate this mesh before continuing");
+                }
 
                 // `face_index` ranges from 0 -> # of faces in the mesh
                 // `edge_index` loops between 0, 1, 2 (assuming triangle faces)
                 //
-                // `current_id` is the index of the new half-edge in the list of half-edges
+                // `current_id` is the index of the new half-edge in the list of half-edges (could
+                // also be calculated as: `half_edges.len()`)
                 let face_offset = face_index * 3;
 
                 let current_id = edge_index + face_offset;
@@ -163,14 +171,6 @@ impl HalfEdgeMesh {
                 half_edge.origin_vertex_id = VertexIndex(edge_indices[0]);
                 half_edge.face_id = Some(FaceIndex(face_index));
 
-                // TODO: vertices shouldn't be added more than once...
-
-                // Add a new, tracked vertex to the mesh
-                vertices.push(Vertex::new(
-                    base_vertices[half_edge.origin_vertex_id.0],
-                    HalfEdgeIndex(current_id),
-                ));
-
                 // Add a new, tracked face to the mesh (only do this once per set of 3 half-edges)
                 if edge_index == 0 {
                     faces.push(Face::new(HalfEdgeIndex(current_id)));
@@ -181,25 +181,37 @@ impl HalfEdgeMesh {
             }
         }
 
+        // Create vertices: we do this separately so that each vertex is only added once
+        for (base_vertex_index, base_vertex) in base_vertices.iter().enumerate() {
+            for (half_edge_index, half_edge) in half_edges.iter().enumerate() {
+                // Is this a half-edge that originates from this vertex?
+                if base_vertex_index == half_edge.origin_vertex_id.0 {
+                    vertices.push(Vertex::new(
+                        base_vertices[half_edge.origin_vertex_id.0],
+                        HalfEdgeIndex(half_edge_index),
+                    ));
+                    break;
+                }
+            }
+        }
         // Some quick sanity checks
         assert_eq!(half_edges.len(), base_faces.len() * 3);
-        assert_eq!(vertices.len(), base_faces.len() * 3);
+        assert_eq!(vertices.len(), base_vertices.len());
         assert_eq!(faces.len(), base_faces.len());
-
-        let mut border_edges = vec![];
 
         // Now, find each half-edge's pair (or "twin" / "opposite"): if one is not found, this means
         // that the half-edge is on the border (i.e. boundary) of the mesh, and a new, "dummy" half-edge
         // will need to be created alongside it
+        let mut border_edges = vec![];
         for i in 0..half_edges.len() {
             let mut found_pair = false;
 
             for j in 0..half_edges.len() {
-
                 if i != j {
-
-                    if half_edges[i].origin_vertex_id == half_edges[half_edges[j].next_id.0].origin_vertex_id &&
-                        half_edges[half_edges[i].next_id.0].origin_vertex_id == half_edges[j].origin_vertex_id
+                    if half_edges[i].origin_vertex_id
+                        == half_edges[half_edges[j].next_id.0].origin_vertex_id
+                        && half_edges[half_edges[i].next_id.0].origin_vertex_id
+                            == half_edges[j].origin_vertex_id
                     {
                         // The vertex from which this half-edge originates from is the same as the other one's next
                         // (the conditions above should uniquely identify this edge)
@@ -211,8 +223,6 @@ impl HalfEdgeMesh {
             }
 
             if !found_pair {
-                // This must be a border edge: create a new, "dummy" pair edge, whose
-                // face pointer is null, i.e. `None`
                 let mut border_edge = HalfEdge::new();
 
                 border_edge.prev_id = HalfEdgeIndex(0); // This will be set later
@@ -221,12 +231,12 @@ impl HalfEdgeMesh {
                 border_edge.origin_vertex_id = half_edges[half_edges[i].next_id.0].origin_vertex_id;
                 border_edge.face_id = None;
 
+                // Set the half-edge's pair to the newly created border half-edge
                 half_edges[i].pair_id = HalfEdgeIndex(half_edges.len() + border_edges.len());
 
                 border_edges.push(border_edge);
             }
         }
-
         println!("\n{} border edges found in total\n", border_edges.len());
 
         // Now, assign next / previous pointers for the newly created half-edges along the border
@@ -236,12 +246,14 @@ impl HalfEdgeMesh {
 
             for j in 0..border_edges.len() {
                 if i != j {
-                    if half_edges[border_edges[i].pair_id.0].origin_vertex_id == border_edges[j].origin_vertex_id
+                    if half_edges[border_edges[i].pair_id.0].origin_vertex_id
+                        == border_edges[j].origin_vertex_id
                     {
                         // The vertex from which this half-edge's pair originates from is the same as the other one
                         border_edges[i].next_id = HalfEdgeIndex(half_edges.len() + j);
                         found_next = true;
-                    } else if border_edges[i].origin_vertex_id == half_edges[border_edges[j].pair_id.0].origin_vertex_id
+                    } else if border_edges[i].origin_vertex_id
+                        == half_edges[border_edges[j].pair_id.0].origin_vertex_id
                     {
                         // The vertex from which this half-edge originates from is the same as the other one's pair
                         border_edges[i].prev_id = HalfEdgeIndex(half_edges.len() + j);
@@ -249,18 +261,17 @@ impl HalfEdgeMesh {
                     }
                 }
             }
-
             if !found_next || !found_prev {
-                panic!("Could not find next (or maybe, previous) half-edge corresponding to border half-edge #{}", i);
+                return Err("Couldn't find next (or maybe, previous) half-edge corresponding to one or more border half-edges");
             }
         }
         half_edges.extend_from_slice(&border_edges);
 
-        HalfEdgeMesh {
+        Ok(HalfEdgeMesh {
             half_edges,
             vertices,
             faces,
-        }
+        })
     }
 
     /// Returns the half-edge at `index`.
@@ -279,7 +290,7 @@ impl HalfEdgeMesh {
     }
 
     /// Returns the indices of the two vertices that are adjacent to this half-edge (
-    /// i.e. the two vertices that make this edge).
+    /// i.e. the two vertices that form this particular edge).
     ///
     /// Reference: `http://www.sccg.sk/~samuelcik/dgs/half_edge.pdf`
     pub fn get_adjacent_vertices(&self, index: HalfEdgeIndex) -> [VertexIndex; 2] {
@@ -288,7 +299,8 @@ impl HalfEdgeMesh {
         // [1] edge -> pair -> vertex
         [
             self.get_half_edge(index).origin_vertex_id,
-            self.get_half_edge(self.get_half_edge(index).pair_id).origin_vertex_id,
+            self.get_half_edge(self.get_half_edge(index).pair_id)
+                .origin_vertex_id,
         ]
     }
 
@@ -299,7 +311,8 @@ impl HalfEdgeMesh {
         // [1] edge -> pair -> face
         [
             self.get_half_edge(index).face_id,
-            self.get_half_edge(self.get_half_edge(index).pair_id).face_id,
+            self.get_half_edge(self.get_half_edge(index).pair_id)
+                .face_id,
         ]
     }
 
@@ -313,7 +326,9 @@ impl HalfEdgeMesh {
 
         loop {
             // Get the current half-edge's pair's next
-            current = self.get_half_edge(self.get_half_edge(current).pair_id).next_id;
+            current = self
+                .get_half_edge(self.get_half_edge(current).pair_id)
+                .next_id;
             if current == start {
                 break;
             }
@@ -323,12 +338,7 @@ impl HalfEdgeMesh {
 
         indices
     }
-
-    pub fn get_all_faces_adjacent_to(&self, index: HalfEdgeIndex) {
-        unimplemented!();
-    }
 }
-
 
 impl fmt::Debug for HalfEdgeMesh {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -339,7 +349,11 @@ impl fmt::Debug for HalfEdgeMesh {
                 write!(f, "Half-edge #{}:\n", half_edge_index)?;
             }
             write!(f, "\tStarts at: {:?}\n", half_edge.origin_vertex_id)?;
-            write!(f, "\tEnds at: {:?}\n", self.get_half_edge(half_edge.pair_id).origin_vertex_id)?;
+            write!(
+                f,
+                "\tEnds at: {:?}\n",
+                self.get_half_edge(half_edge.pair_id).origin_vertex_id
+            )?;
             write!(f, "\tPair half-edge: {:?}\n", half_edge.pair_id)?;
             write!(f, "\tPrevious half-edge: {:?}\n", half_edge.prev_id)?;
             write!(f, "\tNext half-edge: {:?}\n", half_edge.next_id)?;
@@ -363,18 +377,23 @@ mod tests {
             [0, 2, 3], // 2nd triangle
         ];
 
+        // These don't really matter for testing...
         let base_vertices = vec![
-            Vector3::new(-1.0, 1.0, 0.0),  // Vertex #0
-            Vector3::new(-1.0, -1.0, 0.0), // Vertex #1
-            Vector3::new(1.0, -1.0, 0.0),  // Vertex #2
-            Vector3::new(1.0, 1.0, 0.0),   // Vertex #3
+            Vector3::new(0.0, 1.0, 0.0), // Vertex #0
+            Vector3::new(0.0, 0.0, 0.0), // Vertex #1
+            Vector3::new(1.0, 0.0, 0.0), // Vertex #2
+            Vector3::new(1.0, 1.0, 0.0), // Vertex #3
         ];
 
         // There should be 10 half-edges total: 3 for each interior face (of which there are 2) plus
         // 4 for the border (boundary) half-edges
-        let half_edge_mesh = HalfEdgeMesh::from_faces(&base_faces, &base_vertices);
-        assert_eq!(10, half_edge_mesh.half_edges.len());
+        let half_edge_mesh = HalfEdgeMesh::from_faces(&base_faces, &base_vertices).unwrap();
         println!("{:?}", half_edge_mesh);
+
+        // First, some basic tests
+        assert_eq!(10, half_edge_mesh.half_edges.len());
+        assert_eq!(4, half_edge_mesh.vertices.len());
+        assert_eq!(2, half_edge_mesh.faces.len());
 
         // Test adjacency query on a particular vertex: note that we sort the array before any
         // assertions, since we don't know what order the indices will be in
@@ -386,14 +405,51 @@ mod tests {
         adjacent_1.sort();
         adjacent_2.sort();
         adjacent_3.sort();
-        assert_eq!(vec![HalfEdgeIndex(0), HalfEdgeIndex(3), HalfEdgeIndex(9)], adjacent_0);
+        assert_eq!(
+            vec![HalfEdgeIndex(0), HalfEdgeIndex(3), HalfEdgeIndex(9)],
+            adjacent_0
+        );
         assert_eq!(vec![HalfEdgeIndex(1), HalfEdgeIndex(6)], adjacent_1);
-        assert_eq!(vec![HalfEdgeIndex(2), HalfEdgeIndex(4), HalfEdgeIndex(7)], adjacent_2);
+        assert_eq!(
+            vec![HalfEdgeIndex(2), HalfEdgeIndex(4), HalfEdgeIndex(7)],
+            adjacent_2
+        );
         assert_eq!(vec![HalfEdgeIndex(5), HalfEdgeIndex(8)], adjacent_3);
-
         println!("Half-edges adjacent to vertex #0: {:?}", adjacent_0);
         println!("Half-edges adjacent to vertex #1: {:?}", adjacent_1);
         println!("Half-edges adjacent to vertex #2: {:?}", adjacent_2);
         println!("Half-edges adjacent to vertex #3: {:?}", adjacent_3);
+
+        // Test faces along interior edges
+        assert_eq!(
+            Some(FaceIndex(0)),
+            half_edge_mesh.get_half_edge(HalfEdgeIndex(0)).face_id
+        );
+        assert_eq!(
+            Some(FaceIndex(0)),
+            half_edge_mesh.get_half_edge(HalfEdgeIndex(1)).face_id
+        );
+        assert_eq!(
+            Some(FaceIndex(0)),
+            half_edge_mesh.get_half_edge(HalfEdgeIndex(2)).face_id
+        );
+        assert_eq!(
+            Some(FaceIndex(1)),
+            half_edge_mesh.get_half_edge(HalfEdgeIndex(3)).face_id
+        );
+        assert_eq!(
+            Some(FaceIndex(1)),
+            half_edge_mesh.get_half_edge(HalfEdgeIndex(4)).face_id
+        );
+        assert_eq!(
+            Some(FaceIndex(1)),
+            half_edge_mesh.get_half_edge(HalfEdgeIndex(5)).face_id
+        );
+
+        // Test faces along border edges
+        assert_eq!(None, half_edge_mesh.get_half_edge(HalfEdgeIndex(6)).face_id);
+        assert_eq!(None, half_edge_mesh.get_half_edge(HalfEdgeIndex(7)).face_id);
+        assert_eq!(None, half_edge_mesh.get_half_edge(HalfEdgeIndex(8)).face_id);
+        assert_eq!(None, half_edge_mesh.get_half_edge(HalfEdgeIndex(9)).face_id);
     }
 }
