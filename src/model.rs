@@ -317,7 +317,6 @@ impl Model {
             colors.push(assignment.get_color());
         }
 
-
         // Set initial physics params
         let normals = vec![Vector3::zero(); faces.len()];
         let areas = vec![0.0; faces.len()];
@@ -360,8 +359,9 @@ impl Model {
     }
 
     pub fn draw_mesh(&mut self) {
-        self.mesh.set_positions(&self.half_edge_mesh.gather_triangles());
-        self.mesh.draw(gl::TRIANGLES);
+        self.renderable_mesh
+            .set_positions(&self.half_edge_mesh.gather_triangles());
+        self.renderable_mesh.draw(gl::TRIANGLES);
     }
 
     pub fn draw_normals(&self) {
@@ -418,7 +418,7 @@ impl Model {
     }
 
     fn update_mesh(&mut self) {
-        self.mesh.set_positions(&self.positions);
+        self.renderable_mesh.set_positions(&self.positions);
     }
 
     fn apply_axial_constraints(&mut self) {
