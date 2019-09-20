@@ -332,6 +332,21 @@ impl HalfEdgeMesh {
         triangles
     }
 
+    pub fn gather_lines(&self) -> Vec<Vector3<f32>> {
+        let mut lines = vec![];
+
+        for i in 0..self.half_edges.len() {
+            for j in self
+                .get_adjacent_vertices_to_half_edge(HalfEdgeIndex(i))
+                .iter()
+            {
+                lines.push(self.get_vertex(*j).coordinates);
+            }
+        }
+
+        lines
+    }
+
     //    /// Returns the vertex indices corresponding to each half-edge as a list. This function is primarily
     //    /// used to render the half-edge mesh (as in an OpenGL program).
     //    pub fn gather_edge_indices(&self) -> Vec<[VertexIndex; 2]> {
@@ -362,6 +377,11 @@ impl HalfEdgeMesh {
         &self.half_edges
     }
 
+    /// Returns an immutable reference to all of the half-edges that make up this mesh.
+    pub fn get_half_edges_mut(&mut self) -> &mut Vec<HalfEdge> {
+        &mut self.half_edges
+    }
+
     /// Returns an immutable reference to all of the vertices that make up this mesh.
     pub fn get_vertices(&self) -> &Vec<Vertex> {
         &self.vertices
@@ -377,23 +397,57 @@ impl HalfEdgeMesh {
         &self.faces
     }
 
-    /// Returns the half-edge at `index`.
+    /// Returns a mutable reference to all of the faces that make up this mesh.
+    pub fn get_faces_mut(&mut self) -> &mut Vec<Face> {
+        &mut self.faces
+    }
+
+    /// Returns an immutable reference to the half-edge at `index`.
     pub fn get_half_edge(&self, index: HalfEdgeIndex) -> &HalfEdge {
         &self.half_edges[index.0]
     }
 
-    /// Returns the vertex at `index`.
+    /// Returns a mutable reference to the half-edge at `index`.
+    pub fn get_half_edge_mut(&mut self, index: HalfEdgeIndex) -> &mut HalfEdge {
+        &mut self.half_edges[index.0]
+    }
+
+    /// Returns an immutable reference to the vertex at `index`.
     pub fn get_vertex(&self, index: VertexIndex) -> &Vertex {
         &self.vertices[index.0]
     }
 
+    /// Returns a mutable reference to the vertex at `index`.
     pub fn get_vertex_mut(&mut self, index: VertexIndex) -> &mut Vertex {
         &mut self.vertices[index.0]
     }
 
-    /// Returns the face at `index`.
+    /// Returns an immutable reference to the face at `index`.
     pub fn get_face(&self, index: FaceIndex) -> &Face {
         &self.faces[index.0]
+    }
+
+    /// Returns a mutable reference to the face at `index`.
+    pub fn get_face_mut(&mut self, index: FaceIndex) -> &mut Face {
+        &mut self.faces[index.0]
+    }
+
+    /// Returns the index of the half-edge that joins the vertices at `index_0` and `index_1` or `None`
+    /// if such a half-edge doesn't exist. Note that in many cases, there will be more than one half-edge
+    /// that joins the two vertices (since every half-edge also has a pair that runs parallel). In this
+    /// case, the index of the first half-edge found is returned.
+    pub fn find_half_edge_between_vertices(
+        &self,
+        index_0: VertexIndex,
+        index_1: VertexIndex,
+    ) -> Option<HalfEdgeIndex> {
+        for i in self.get_adjacent_half_edges_to_vertex(index_0).iter() {
+            // Is the second vertex at the other end of this half-edge?
+            if self.get_terminating_vertex_along_half_edge(*i) == index_1 {
+                return Some(*i);
+            }
+        }
+        None
     }
 
     /// Returns the index of the vertex opposite this half-edge's origin (i.e. where the half-edge

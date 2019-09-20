@@ -14,7 +14,11 @@ use crate::graphics::utils;
 use crate::model::Model;
 
 use cgmath::{EuclideanSpace, Matrix4, Point3, SquareMatrix, Vector3};
+use glutin::ContextBuilder;
 use glutin::dpi::LogicalSize;
+use glutin::event::{Event, WindowEvent};
+use glutin::event_loop::{ControlFlow, EventLoop};
+use glutin::window::WindowBuilder;
 use std::path::Path;
 
 /// Sets the draw state (enables depth testing, etc.)
@@ -29,17 +33,25 @@ fn set_draw_state() {
     }
 }
 
+fn clear_screen() {
+    unsafe {
+        // Clear the screen to (off)black
+        gl::ClearColor(0.12, 0.1, 0.1, 1.0);
+        gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
+    }
+}
+
 fn main() {
     let size = LogicalSize::new(720.0, 720.0);
-    let mut events_loop = glutin::EventsLoop::new();
-    let window = glutin::WindowBuilder::new()
+    let el = EventLoop::new();
+    let wb = WindowBuilder::new()
         .with_title("folding")
-        .with_dimensions(size);
-    let gl_window = glutin::ContextBuilder::new()
-        .build_windowed(window, &events_loop)
-        .unwrap();
-
-    let gl_window = unsafe { gl_window.make_current() }.unwrap();
+        .with_decorations(false)
+        .with_inner_size(size);
+    let windowed_context =
+        ContextBuilder::new().build_windowed(wb, &el).unwrap();
+    let windowed_context = unsafe { windowed_context.make_current().unwrap() };
+    let gl_window = unsafe { windowed_context.make_current() }.unwrap();
     gl::load_with(|symbol| gl_window.get_proc_address(symbol) as *const _);
 
     // Load the shader program used for rendering
@@ -75,27 +87,34 @@ fn main() {
     let mut model = Model::from_specification(&spec, 1000.0);
 
     // Main rendering loop
-    events_loop.run_forever(|event| {
-        use glutin::{ControlFlow, Event, WindowEvent};
-
-        if let Event::WindowEvent { event, .. } = event {
-            if let WindowEvent::CloseRequested = event {
-                return ControlFlow::Break;
-            }
-        }
+    el.run(move |event, _, control_flow| {
+        *control_flow = ControlFlow::Poll;
 
         model.step_simulation();
 
-        unsafe {
-            // Clear the screen to black
-            gl::ClearColor(0.12, 0.1, 0.1, 1.0);
-            gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
-
-            model.draw_mesh();
-        }
+        clear_screen();
+        model.draw_mesh();
 
         gl_window.swap_buffers().unwrap();
 
-        ControlFlow::Continue
+        match event {
+            Event::LoopDestroyed => return,
+            Event::WindowEvent { ref event, .. } => match event {
+                WindowEvent::Resized(logical_size) => {
+                    let dpi_factor =
+                        gl_window.window().hidpi_factor();
+                    gl_window
+                        .resize(logical_size.to_physical(dpi_factor));
+                }
+                WindowEvent::RedrawRequested => {
+                    // Not sure what this does...
+                }
+                WindowEvent::CloseRequested => {
+                    *control_flow = ControlFlow::Exit
+                }
+                _ => (),
+            },
+            _ => (),
+        }
     });
 }

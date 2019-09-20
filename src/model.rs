@@ -263,9 +263,6 @@ impl Model {
             println!("{:?}", v.get_coordinates());
         }
 
-        // Construct a renderable, GPU mesh from the adjacency information provided by the half-edge mesh
-        let renderable_mesh = Mesh::new(&half_edge_mesh.gather_triangles(), None, None, None);
-
         // Create colors for rendering
         let mut colors = vec![];
         for data in edge_data.iter() {
@@ -273,13 +270,13 @@ impl Model {
             colors.push(data.assignment.get_color());
             colors.push(data.assignment.get_color());
         }
-        // TODO: use the colors
 
-        // Set initial physics params
+        // Construct a renderable, GPU mesh from the adjacency information provided by the half-edge mesh
+        let renderable_mesh = Mesh::new(&half_edge_mesh.gather_lines(), Some(&colors), None, None);
         face_data = vec![FaceData::new(); half_edge_mesh.get_faces().len()];
 
+        // Set initial physics params
         let masses = vec![1.0; half_edge_mesh.get_vertices().len()];
-
         let params = SimulationParameters::new();
 
         // Calculate the timestep for the physics simulation
@@ -291,7 +288,7 @@ impl Model {
         let positions = half_edge_mesh
             .get_vertices()
             .iter()
-            .map(|&v| *v.get_coordinates() * 1.2)
+            .map(|&v| *v.get_coordinates() * 4.2)
             .collect();
         let velocities = vec![Vector3::zero(); half_edge_mesh.get_vertices().len()];
         let accelerations = vec![Vector3::zero(); half_edge_mesh.get_vertices().len()];
@@ -312,7 +309,7 @@ impl Model {
     }
 
     pub fn draw_mesh(&mut self) {
-        self.renderable_mesh.draw(gl::TRIANGLES);
+        self.renderable_mesh.draw(gl::LINES);
     }
 
     pub fn draw_normals(&self) {
@@ -329,15 +326,12 @@ impl Model {
 
             // Apply 3 different types of forces
             self.apply_axial_constraints();
-            // TODO: self.apply_crease_constraints();
-            // TODO: self.apply_face_constraints();
-
-            //println!("{:?}", self.forces[0]);
+            // self.apply_crease_constraints();
+            // self.apply_face_constraints();
 
             // Integrate accelerations, velocities, and positions
             self.integrate();
         }
-
         // Send new position data to the GPU
         self.update_mesh();
     }
@@ -385,8 +379,6 @@ impl Model {
 
     fn apply_axial_constraints(&mut self) {
         for (i, vertex) in self.half_edge_mesh.get_vertices().iter().enumerate() {
-            // 0, 1, 2, ..., 13
-
             let mut force_axial = Vector3::zero();
             let mut force_damping = Vector3::zero();
 
@@ -395,44 +387,31 @@ impl Model {
                 .get_adjacent_vertices_to_vertex(VertexIndex(i));
 
             for neighbor in neighbors.iter() {
-
-
                 let p0 = self.positions[i];
                 let p1 = self.positions[neighbor.0];
-
-                //println!("axial from vertices #{} -> #{}", i, neighbor.0);
 
                 // Force from the second (neighbor) vertex towards the first vertex
                 let mut direction = p0 - p1;
                 let l = direction.magnitude();
-                let half_edge_index = vertex.get_half_edge();
-
-                // TODO: we have to find the index of the half-edge corresponding to the
-                //  edge <i, neighbor>, then grab THIS nominal length
-                let mut l_0 = self.edge_data[half_edge_index.0].nominal_length;
-
-                for (idx, he) in self.half_edge_mesh.get_half_edges().iter().enumerate() {
-
-                    let edges = self.half_edge_mesh.get_adjacent_vertices_to_half_edge(HalfEdgeIndex(idx));
-
-                    if (edges[0].0 == i && edges[1] == *neighbor) || (edges[1].0 == i && edges[0] == *neighbor) {
-                        l_0 = self.edge_data[idx].nominal_length;
-                        break;
-                    }
-                }
-
-
-                let k_axial = self.params.ea / l_0;
                 direction = direction.normalize();
 
+                // Find the index of the half-edge that joins these two vertices
+                let half_edge_index = self
+                    .half_edge_mesh
+                    .find_half_edge_between_vertices(VertexIndex(i), *neighbor)
+                    .unwrap();
+
+                // Use the index above to grab some information about this edge
+                let mut l_0 = self.edge_data[half_edge_index.0].nominal_length;
+
                 // Accumulate axial force from this neighbor
+                let k_axial = self.params.ea / l_0;
                 force_axial += -k_axial * (l - l_0) * direction * 0.1;
 
                 // Accumulate damping force
                 let c = 2.0 * self.params.zeta * (k_axial * self.masses[i]).sqrt();
                 force_damping += c * (self.velocities[i] - self.velocities[neighbor.0]);
             }
-
             self.forces[i] += force_axial + force_damping;
         }
     }
@@ -449,7 +428,6 @@ impl Model {
         for (i, a) in self.accelerations.iter_mut().enumerate() {
             *a = self.forces[i] / self.masses[i];
             *a *= self.timestep;
-            //println!("{:?}", *a);
         }
 
         for (i, v) in self.velocities.iter_mut().enumerate() {
@@ -464,20 +442,21 @@ impl Model {
 
     fn update_mesh(&mut self) {
         // Update the vertices of the half-edge mesh
-        assert_eq!(self.half_edge_mesh.get_vertices().len(), self.positions.len());
-
-        for (vertex, p) in self
+        assert_eq!(
+            self.half_edge_mesh.get_vertices().len(),
+            self.positions.len()
+        );
+        for (vertex, position) in self
             .half_edge_mesh
             .get_vertices_mut()
             .iter_mut()
             .zip(self.positions.iter())
         {
-            vertex.set_coordinates(p);
+            vertex.set_coordinates(position);
         }
-        //println!("{:?}", self.positions);
 
         // Transfer triangles to GPU for rendering
         self.renderable_mesh
-            .set_positions(&self.half_edge_mesh.gather_triangles());
+            .set_positions(&self.half_edge_mesh.gather_lines());
     }
 }
