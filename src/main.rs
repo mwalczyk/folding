@@ -14,11 +14,11 @@ use crate::graphics::utils;
 use crate::model::Model;
 
 use cgmath::{EuclideanSpace, Matrix4, Point3, SquareMatrix, Vector3};
-use glutin::ContextBuilder;
 use glutin::dpi::LogicalSize;
 use glutin::event::{Event, WindowEvent};
 use glutin::event_loop::{ControlFlow, EventLoop};
 use glutin::window::WindowBuilder;
+use glutin::ContextBuilder;
 use std::path::Path;
 
 /// Sets the draw state (enables depth testing, etc.)
@@ -48,8 +48,7 @@ fn main() {
         .with_title("folding")
         .with_decorations(false)
         .with_inner_size(size);
-    let windowed_context =
-        ContextBuilder::new().build_windowed(wb, &el).unwrap();
+    let windowed_context = ContextBuilder::new().build_windowed(wb, &el).unwrap();
     let windowed_context = unsafe { windowed_context.make_current().unwrap() };
     let gl_window = unsafe { windowed_context.make_current() }.unwrap();
     gl::load_with(|symbol| gl_window.get_proc_address(symbol) as *const _);
@@ -91,27 +90,22 @@ fn main() {
         *control_flow = ControlFlow::Poll;
 
         model.step_simulation();
-
         clear_screen();
         model.draw_mesh();
-
+        model.draw_normals();
         gl_window.swap_buffers().unwrap();
 
         match event {
             Event::LoopDestroyed => return,
             Event::WindowEvent { ref event, .. } => match event {
                 WindowEvent::Resized(logical_size) => {
-                    let dpi_factor =
-                        gl_window.window().hidpi_factor();
-                    gl_window
-                        .resize(logical_size.to_physical(dpi_factor));
+                    let dpi_factor = gl_window.window().hidpi_factor();
+                    gl_window.resize(logical_size.to_physical(dpi_factor));
                 }
                 WindowEvent::RedrawRequested => {
-                    // Not sure what this does...
+                    // TODO: `https://docs.rs/winit/0.20.0-alpha3/winit/window/struct.Window.html#method.request_redraw`
                 }
-                WindowEvent::CloseRequested => {
-                    *control_flow = ControlFlow::Exit
-                }
+                WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
                 _ => (),
             },
             _ => (),

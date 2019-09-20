@@ -113,6 +113,9 @@ struct FaceData {
     // The normal vector of this face
     normal: Vector3<f32>,
 
+    // The centroid of this face
+    centroid: Vector3<f32>,
+
     // The surface area of this face
     area: f32,
 }
@@ -121,6 +124,7 @@ impl FaceData {
     pub fn new() -> FaceData {
         FaceData {
             normal: Vector3::unit_y(),
+            centroid: Vector3::zero(),
             area: 0.0,
         }
     }
@@ -158,7 +162,10 @@ pub struct Model {
     accelerations: Vec<Vector3<f32>>,
 
     // The render-able mesh
-    renderable_mesh: Mesh,
+    mesh_body: Mesh,
+
+    // The mesh for drawing debug normals
+    mesh_debug: Mesh,
 }
 
 impl Model {
@@ -219,49 +226,42 @@ impl Model {
             // Find the index of the (base) edge of this model that matches this half-edge (i.e.
             // they start / end at the same vertex indices)
             for (base_edge_index, base_edge_indices) in base_edges.iter().enumerate() {
-                if (half_edge_indices[0] == VertexIndex(base_edge_indices[0])
-                    && half_edge_indices[1] == VertexIndex(base_edge_indices[1]))
-                    || (half_edge_indices[0] == VertexIndex(base_edge_indices[1])
-                        && half_edge_indices[1] == VertexIndex(base_edge_indices[0]))
+                if (half_edge_indices[0].0 == base_edge_indices[0]
+                    && half_edge_indices[1].0 == base_edge_indices[1])
+                    || (half_edge_indices[0].0 == base_edge_indices[1]
+                        && half_edge_indices[1].0 == base_edge_indices[0])
                 {
                     // Find this edge's assignment
                     let assignment_str = &spec.assignments[base_edge_index];
                     let assignment = assignment_str.parse::<Assignment>().unwrap();
 
+                    // Find this edge's target fold angle
                     let target_angle = match assignment {
                         Assignment::M => -std::f32::consts::PI,
                         Assignment::V => std::f32::consts::PI,
                         _ => 0.0,
                     };
 
-                    // First, calculate the length of this edge
+                    // Find this edge's length
                     let v0 = half_edge_mesh.get_vertex(half_edge_indices[0]);
                     let v1 = half_edge_mesh.get_vertex(half_edge_indices[1]);
                     let l_0 = (v0.get_coordinates() - v1.get_coordinates()).magnitude();
                     assert!(l_0.abs() > 0.0);
 
-                    // Then, calculate the axial coefficient for this edge
+                    // Find this edge's axial coefficient
                     let k_axial = 20.0f32 / l_0;
 
+                    // Used for calculating the simulation timestep below
                     let omega = (k_axial / masses_min).sqrt();
                     if omega > omega_max {
                         omega_max = omega;
                     }
-                    println!(
-                        "Half-edge with vertex indices {:?} assigned: {:?}",
-                        half_edge_indices, assignment_str
-                    );
 
                     edge_data.push(EdgeData::new(assignment, 0.0, target_angle, l_0, k_axial));
                 }
             }
         }
         assert_eq!(half_edge_mesh.get_half_edges().len(), edge_data.len());
-        println!("Edge data: {:?}\n", edge_data);
-        println!("Vertices:");
-        for v in half_edge_mesh.get_vertices().iter() {
-            println!("{:?}", v.get_coordinates());
-        }
 
         // Create colors for rendering
         let mut colors = vec![];
@@ -271,16 +271,18 @@ impl Model {
             colors.push(data.assignment.get_color());
         }
 
-        // Construct a renderable, GPU mesh from the adjacency information provided by the half-edge mesh
-        let renderable_mesh = Mesh::new(&half_edge_mesh.gather_lines(), Some(&colors), None, None);
         face_data = vec![FaceData::new(); half_edge_mesh.get_faces().len()];
+
+        // Construct a renderable, GPU mesh from the adjacency information provided by the half-edge mesh
+        let mesh_body = Mesh::new(&half_edge_mesh.gather_lines(), Some(&colors), None, None);
+        let mesh_debug = Mesh::new(&vec![Vector3::zero(); half_edge_mesh.get_faces().len() * 2], None, None, None);
 
         // Set initial physics params
         let masses = vec![1.0; half_edge_mesh.get_vertices().len()];
         let params = SimulationParameters::new();
 
         // Calculate the timestep for the physics simulation
-        let timestep_reduction = 1.2;
+        let timestep_reduction = 1.0;
         let timestep = (1.0 / (2.0 * std::f32::consts::PI * omega_max)) * timestep_reduction;
         println!("Setting simulation timestep to {}\n", timestep);
 
@@ -288,7 +290,7 @@ impl Model {
         let positions = half_edge_mesh
             .get_vertices()
             .iter()
-            .map(|&v| *v.get_coordinates() * 4.2)
+            .map(|&v| *v.get_coordinates() * 1.2)
             .collect();
         let velocities = vec![Vector3::zero(); half_edge_mesh.get_vertices().len()];
         let accelerations = vec![Vector3::zero(); half_edge_mesh.get_vertices().len()];
@@ -304,16 +306,18 @@ impl Model {
             positions,
             velocities,
             accelerations,
-            renderable_mesh,
+            mesh_body,
+            mesh_debug,
         }
     }
 
     pub fn draw_mesh(&mut self) {
-        self.renderable_mesh.draw(gl::LINES);
+        self.mesh_body.draw(gl::LINES);
+
     }
 
     pub fn draw_normals(&self) {
-        unimplemented!();
+        self.mesh_debug.draw(gl::LINES);
     }
 
     pub fn step_simulation(&mut self) {
@@ -356,7 +360,7 @@ impl Model {
                 .half_edge_mesh
                 .get_vertex(face_indices[2])
                 .get_coordinates();
-            let _centroid = (*p0 + *p1 + *p2) / 3.0;
+            let centroid = (*p0 + *p1 + *p2) / 3.0;
 
             let mut u = *p1 - *p0;
             let mut v = *p2 - *p0;
@@ -369,6 +373,7 @@ impl Model {
             let normal = u.cross(v).normalize();
 
             self.face_data[i].normal = normal;
+            self.face_data[i].centroid = centroid;
             self.face_data[i].area = area;
 
             // To draw the normals, create a line segment from `centroid` to the
@@ -417,7 +422,26 @@ impl Model {
     }
 
     fn apply_crease_constraints(&mut self) {
-        unimplemented!();
+        for (half_edge_index, half_edge) in self.half_edge_mesh.get_half_edges().iter().enumerate()
+        {
+            // The indices of the two vertices that make up this edge
+            let vertices = self
+                .half_edge_mesh
+                .get_adjacent_vertices_to_half_edge(HalfEdgeIndex(half_edge_index));
+
+            // The indices of the two faces that surround this edge
+            let faces = self
+                .half_edge_mesh
+                .get_adjacent_faces_to_half_edge(HalfEdgeIndex(half_edge_index));
+
+            // If either face is null, then this is a border edge
+            if faces[0].is_none() || faces[1].is_none() {
+                continue;
+            }
+
+            let face_0 = faces[0].unwrap();
+            let face_1 = faces[1].unwrap();
+        }
     }
 
     fn apply_face_constraints(&mut self) {
@@ -456,7 +480,17 @@ impl Model {
         }
 
         // Transfer triangles to GPU for rendering
-        self.renderable_mesh
+        self.mesh_body
             .set_positions(&self.half_edge_mesh.gather_lines());
+
+
+        // Transfer face data to GPU for rendering
+        let mut normal_debug_lines = vec![];
+        let length = 50.0;
+        for data in self.face_data.iter() {
+            normal_debug_lines.push(data.centroid);
+            normal_debug_lines.push(data.centroid + data.normal * length);
+        }
+        self.mesh_debug.set_positions(&normal_debug_lines);
     }
 }
