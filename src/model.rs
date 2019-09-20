@@ -134,6 +134,9 @@ pub struct Model {
     // The CPU-side half-edge mesh representation used for adjacency queries
     half_edge_mesh: HalfEdgeMesh,
 
+    faces: Vec<[usize; 3]>,
+    edges: Vec<[usize; 2]>,
+
     // Data associated with each edge
     edge_data: Vec<EdgeData>,
 
@@ -297,6 +300,8 @@ impl Model {
 
         Model {
             half_edge_mesh,
+            faces: base_faces,
+            edges: base_edges,
             edge_data,
             face_data,
             masses,
@@ -441,6 +446,8 @@ impl Model {
 
             let face_0 = faces[0].unwrap();
             let face_1 = faces[1].unwrap();
+
+            // Get the two "hinge" (opposite) vertices
         }
     }
 

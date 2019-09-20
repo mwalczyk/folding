@@ -315,7 +315,7 @@ impl HalfEdgeMesh {
         })
     }
 
-    /// This function is primarily used to render the half-edge mesh (as in an OpenGL program).
+    /// This function is primarily used to render the half-edge mesh as triangles (as in an OpenGL program).
     pub fn gather_triangles(&self) -> Vec<Vector3<f32>> {
         let mut triangles = vec![];
 
@@ -332,6 +332,7 @@ impl HalfEdgeMesh {
         triangles
     }
 
+    /// This function is primarily used to render the half-edge mesh as a wireframe (as in an OpenGL program).
     pub fn gather_lines(&self) -> Vec<Vector3<f32>> {
         let mut lines = vec![];
 
@@ -346,22 +347,6 @@ impl HalfEdgeMesh {
 
         lines
     }
-
-    //    /// Returns the vertex indices corresponding to each half-edge as a list. This function is primarily
-    //    /// used to render the half-edge mesh (as in an OpenGL program).
-    //    pub fn gather_edge_indices(&self) -> Vec<[VertexIndex; 2]> {
-    //        self.half_edges
-    //            .iter()
-    //            .enumerate()
-    //            .map(|(i, &he)| self.get_adjacent_vertices_to_half_edge(HalfEdgeIndex(i)))
-    //            .collect()
-    //    }
-    //
-    //    /// Returns the coordinates of all of the vertices that make up this half-edge mesh as a list. This function
-    //    /// is primarily used to render the half-edge mesh (as in an OpenGL program).
-    //    pub fn gather_vertex_coordinates(&self) -> Vec<Vector3<f32>> {
-    //        self.vertices.iter().map(|&v| v.coordinates).collect()
-    //    }
 
     /// Returns `true` if the half-edge at `index` is along the border (i.e. is a "dummy"
     /// half-edge) and `false` otherwise.
@@ -445,6 +430,29 @@ impl HalfEdgeMesh {
             // Is the second vertex at the other end of this half-edge?
             if self.get_terminating_vertex_along_half_edge(*i) == index_1 {
                 return Some(*i);
+            }
+        }
+        None
+    }
+
+    /// Returns the index of the vertex that is opposite to the half-edge at `index`. Assuming all faces
+    /// are triangular, this function returns the index of the vertex that is *not* this half-edge's origin
+    /// vertex and *not* its terminating vertex (i.e. the vertex at the "end" of the half-edge).
+    pub fn get_vertex_opposite_to_half_edge(&self, index: HalfEdgeIndex) -> Option<VertexIndex> {
+        // The indices of the two vertices that form this edge
+        let half_edge_vertices = self.get_adjacent_vertices_to_half_edge(index);
+
+        // Remember that not all half-edges will actually point to a valid face
+        let maybe_face = self.get_half_edge(index).face_id;
+        if let Some(face) = maybe_face {
+            // Get the indices of the vertices that surround this face
+            let vertices = self.get_adjacent_vertices_to_face(face);
+
+            // Find the third vertex
+            for vertex in vertices.iter() {
+                if *vertex != half_edge_vertices[0] && *vertex != half_edge_vertices[1] {
+                    return Some(*vertex);
+                }
             }
         }
         None
@@ -734,6 +742,18 @@ mod tests {
         assert_eq!(None, half_edge_mesh.get_half_edge(HalfEdgeIndex(7)).face_id);
         assert_eq!(None, half_edge_mesh.get_half_edge(HalfEdgeIndex(8)).face_id);
         assert_eq!(None, half_edge_mesh.get_half_edge(HalfEdgeIndex(9)).face_id);
+
+        // Test opposite vertices
+        assert_eq!(Some(VertexIndex(2)), half_edge_mesh.get_vertex_opposite_to_half_edge(HalfEdgeIndex(0)));
+        assert_eq!(Some(VertexIndex(0)), half_edge_mesh.get_vertex_opposite_to_half_edge(HalfEdgeIndex(1)));
+        assert_eq!(Some(VertexIndex(1)), half_edge_mesh.get_vertex_opposite_to_half_edge(HalfEdgeIndex(2)));
+        assert_eq!(Some(VertexIndex(3)), half_edge_mesh.get_vertex_opposite_to_half_edge(HalfEdgeIndex(3)));
+        assert_eq!(Some(VertexIndex(0)), half_edge_mesh.get_vertex_opposite_to_half_edge(HalfEdgeIndex(4)));
+        assert_eq!(Some(VertexIndex(2)), half_edge_mesh.get_vertex_opposite_to_half_edge(HalfEdgeIndex(5)));
+        assert_eq!(None, half_edge_mesh.get_vertex_opposite_to_half_edge(HalfEdgeIndex(6)));
+        assert_eq!(None, half_edge_mesh.get_vertex_opposite_to_half_edge(HalfEdgeIndex(7)));
+        assert_eq!(None, half_edge_mesh.get_vertex_opposite_to_half_edge(HalfEdgeIndex(8)));
+        assert_eq!(None, half_edge_mesh.get_vertex_opposite_to_half_edge(HalfEdgeIndex(9)));
 
         // Test gather methods
         println!("\n{:?}", half_edge_mesh.gather_triangles());
