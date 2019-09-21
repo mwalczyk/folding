@@ -9,6 +9,10 @@ use std::str::FromStr;
 
 type Color = Vector3<f32>;
 
+fn cot(x: f32) -> f32 {
+    1.0 / x.tan()
+}
+
 #[derive(Clone, Copy, Debug)]
 enum Assignment {
     M,
@@ -131,9 +135,7 @@ impl FaceData {
 }
 
 pub struct Model {
-    // The CPU-side half-edge mesh representation used for adjacency queries
-    half_edge_mesh: HalfEdgeMesh,
-
+    vertices: Vec<Vector3<f32>>,
     faces: Vec<[usize; 3]>,
     edges: Vec<[usize; 2]>,
 
@@ -144,6 +146,8 @@ pub struct Model {
     face_data: Vec<FaceData>,
 
     neighbors: HashMap<usize, HashSet<usize>>,
+
+    opposites: HashMap<usize, Vec<(usize, usize)>>,
 
     // The mass of each vertex of this model
     masses: Vec<f32>,
@@ -181,15 +185,8 @@ impl Model {
         let mut edge_data = vec![];
         let mut face_data = vec![];
 
-        // Calculate vertex masses
-        let masses_min = 1.0; // TODO
-        println!("Vertex with the smallest mass ({} units)\n", masses_min);
-
-        // Calculate nominal (rest) lengths for each edge
-        let mut omega_max = 0.0;
-
-
-
+        // Set initial physics params
+        let params = SimulationParameters::new();
 
         // Add vertices
         for vertex_coordinates in spec.vertices.iter() {
@@ -201,6 +198,11 @@ impl Model {
             ));
         }
         assert_eq!(base_vertices.len(), spec.vertices.len());
+
+        // TODO: calculate vertex masses and find the minimum
+        // ...
+        let mut masses_min = 1.0;
+        let mut omega_max = 0.0;
 
         // Add edges
         for (edge_index, edge_indices) in spec.edges.iter().enumerate() {
@@ -218,14 +220,14 @@ impl Model {
                 _ => 0.0,
             };
 
-            // Find this edge's length
+            // Find this edge's nominal (starting) length
             let v0 = base_vertices[edge_indices[0] as usize];
             let v1 = base_vertices[edge_indices[1] as usize];
             let l_0 = (v0 - v1).magnitude();
             assert!(l_0.abs() > 0.0);
 
             // Find this edge's axial coefficient
-            let k_axial = 20.0f32 / l_0;
+            let k_axial = params.ea / l_0;
 
             // Used for calculating the simulation timestep below
             let omega = (k_axial / masses_min).sqrt();
@@ -256,36 +258,69 @@ impl Model {
         assert_eq!(base_faces.len(), spec.faces.len());
         assert_eq!(base_faces.len(), face_data.len());
 
-
-        // Create neighborhood map
+        // Create neighborhood map, which tells us the indices of all of the vertices (the neighbors)
+        // that surround each vertex
         let mut neighbors: HashMap<_, HashSet<_>> = HashMap::new();
         for edge_indices in base_edges.iter() {
-            if let Some(v) = neighbors.get_mut(&edge_indices[0]) {
-                v.insert(edge_indices[1]);
+            let (a, b) = (edge_indices[0], edge_indices[1]);
+
+            if let Some(v) = neighbors.get_mut(&a) {
+                v.insert(b);
             } else {
-                neighbors.insert(edge_indices[0], HashSet::new());
+                neighbors.insert(a, HashSet::new());
+                neighbors.get_mut(&a).unwrap().insert(b);
             }
 
-            if let Some(v) = neighbors.get_mut(&edge_indices[1]) {
-                v.insert(edge_indices[0]);
+            if let Some(v) = neighbors.get_mut(&b) {
+                v.insert(a);
             } else {
-                neighbors.insert(edge_indices[1], HashSet::new());
+                neighbors.insert(b, HashSet::new());
+                neighbors.get_mut(&b).unwrap().insert(a);
             }
         }
 
+        // Each entry looks like:
+        //
+        // edge_index: {(face_index, vertex_index), (face_index, vertex_index), ... }
+        let mut opposites: HashMap<_, Vec<_>> = HashMap::new();
 
-        // Construct half-edge representation of this model
-        let half_edge_mesh = HalfEdgeMesh::from_faces(&base_faces, &base_vertices).unwrap();
+        for (edge_index, edge_indices) in base_edges.iter().enumerate() {
+            println!("Examing edge #{}: {:?}", edge_index, edge_indices);
 
+            for (face_index, face_indices) in base_faces.iter().enumerate() {
+                let edge_set: HashSet<usize> = edge_indices.iter().cloned().collect();
+                assert_eq!(edge_set.len(), 2);
+                let face_set: HashSet<usize> = face_indices.iter().cloned().collect();
+                assert_eq!(face_set.len(), 3);
 
+                // Is this edge part of this face?
+                if edge_set.is_subset(&face_set) {
+                    println!("\tEdge is part of face #{}: {:?}", face_index, face_indices);
 
+                    // The difference should always yield a list with a single element
+                    let difference: Vec<_> = face_set.difference(&edge_set).collect();
+                    assert_eq!(difference.len(), 1);
 
+                    // The third vertex in this face that is opposite this edge
+                    let opposite = *difference[0];
 
+                    if let Some(v) = opposites.get_mut(&edge_index) {
+                        v.push((face_index, opposite));
+                    } else {
+                        opposites.insert(edge_index, Vec::new());
+                        opposites
+                            .get_mut(&edge_index)
+                            .unwrap()
+                            .push((face_index, opposite));
+                    }
+                }
+            }
+        }
+        println!("{:?}", opposites);
 
         let mut line_positions = vec![];
         let mut colors = vec![];
         for (edge_indices, data) in base_edges.iter().zip(edge_data.iter()) {
-
             // Push back the two endpoints
             line_positions.push(base_vertices[edge_indices[0]]);
             line_positions.push(base_vertices[edge_indices[1]]);
@@ -295,23 +330,19 @@ impl Model {
             colors.push(data.assignment.get_color());
         }
 
-
-
-
-
-
         // Construct a renderable, GPU mesh from the adjacency information provided by the half-edge mesh
         let mesh_body = Mesh::new(&line_positions, Some(&colors), None, None);
-        let mesh_debug = Mesh::new(&vec![Vector3::zero(); base_faces.len() * 2], None, None, None);
-
-        // Set initial physics params
-        let params = SimulationParameters::new();
+        let mesh_debug = Mesh::new(
+            &vec![Vector3::zero(); base_faces.len() * 2],
+            None,
+            None,
+            None,
+        );
 
         // Calculate the timestep for the physics simulation
-        let timestep_reduction = 1.0;
+        let timestep_reduction = 0.1;
         let timestep = (1.0 / (2.0 * std::f32::consts::PI * omega_max)) * timestep_reduction;
         println!("Setting simulation timestep to {}\n", timestep);
-
 
         let masses = vec![1.0; base_vertices.len()];
         let forces = vec![Vector3::zero(); base_vertices.len()];
@@ -323,12 +354,13 @@ impl Model {
         let accelerations = vec![Vector3::zero(); base_vertices.len()];
 
         Model {
-            half_edge_mesh,
+            vertices: base_vertices,
             faces: base_faces,
             edges: base_edges,
             edge_data,
             face_data,
             neighbors,
+            opposites,
             masses,
             params,
             timestep,
@@ -343,7 +375,6 @@ impl Model {
 
     pub fn draw_mesh(&mut self) {
         self.mesh_body.draw(gl::LINES);
-
     }
 
     pub fn draw_normals(&self) {
@@ -353,15 +384,15 @@ impl Model {
     pub fn step_simulation(&mut self) {
         for _ in 0..self.params.iterations {
             // Reset forces
-            self.forces = vec![Vector3::zero(); self.half_edge_mesh.get_vertices().len()];
+            self.forces = vec![Vector3::zero(); self.positions.len()];
 
-            // First, calculate new face normals / areas
+            // Calculate new face normals / areas
             self.update_face_data();
 
             // Apply 3 different types of forces
             self.apply_axial_constraints();
-            // self.apply_crease_constraints();
-            // self.apply_face_constraints();
+            self.apply_crease_constraints();
+            self.apply_face_constraints();
 
             // Integrate accelerations, velocities, and positions
             self.integrate();
@@ -446,32 +477,127 @@ impl Model {
     }
 
     fn apply_crease_constraints(&mut self) {
-//        for (half_edge_index, half_edge) in self.half_edge_mesh.get_half_edges().iter().enumerate()
-//        {
-//            // The indices of the two vertices that make up this edge
-//            let vertices = self
-//                .half_edge_mesh
-//                .get_adjacent_vertices_to_half_edge(HalfEdgeIndex(half_edge_index));
-//
-//            // The indices of the two faces that surround this edge
-//            let faces = self
-//                .half_edge_mesh
-//                .get_adjacent_faces_to_half_edge(HalfEdgeIndex(half_edge_index));
-//
-//            // If either face is null, then this is a border edge
-//            if faces[0].is_none() || faces[1].is_none() {
-//                continue;
-//            }
-//
-//            let face_0 = faces[0].unwrap();
-//            let face_1 = faces[1].unwrap();
-//
-//            // Get the two "hinge" (opposite) vertices
-//        }
+        for (edge_index, edge_indices) in self.edges.iter().enumerate() {
+            // Don't process border edges, which only have a single face neighbor
+            if self.opposites.get(&edge_index).unwrap().len() == 2 {
+
+                let opposite = self.opposites.get(&edge_index).unwrap();
+
+                // The indices of the two faces adjacent to this edge
+                let face_0 = opposite[0].0;
+                let face_1 = opposite[1].0;
+
+                // The indices of the two vertices opposite this edge, across each of the two
+                // adjacent faces
+                let out_0 = opposite[0].1;
+                let out_1 = opposite[1].1;
+
+                // The indices of the two vertices that form this edge
+                let p0 = edge_indices[0];
+                let p1 = edge_indices[1];
+
+                // The base of each face triangle (the length of this crease)
+                let b = (self.positions[p0] - self.positions[p1]).magnitude();
+
+                // Grab the normal vectors of the two adjacent faces
+                let n_0 = self.face_data[face_0].normal;
+                let n_1 = self.face_data[face_1].normal;
+
+                // Grab the surface areas of the two adjacent faces
+                let a_0 = self.face_data[face_0].area;
+                let a_1 = self.face_data[face_1].area;
+
+                // Calculate the altitudes of the two adjacent (triangular) faces
+                let h_0 = 2.0 * (a_0 / b);
+                let h_1 = 2.0 * (a_1 / b);
+
+                // Interior angles on triangle `face_0`
+                let p0_out_0 = (self.positions[p0] - self.positions[out_0]).magnitude();
+                let p1_out_0 = (self.positions[p1] - self.positions[out_0]).magnitude();
+
+                let angle_p0_out_0 = if (h_0 / p0_out_0).abs() > 1.0 {
+                    std::f32::consts::FRAC_PI_2 // 90 degrees
+                } else {
+                   (h_0 / p0_out_0).asin()
+                };
+                let angle_p1_out_0 = if (h_0 / p1_out_0).abs() > 1.0 {
+                    std::f32::consts::FRAC_PI_2 // 90 degrees
+                } else {
+                    (h_0 / p1_out_0).asin()
+                };
+
+                // Interior angles on triangle `face_1`
+                let p0_out_1 = (self.positions[p0] - self.positions[out_1]).magnitude();
+                let p1_out_1 = (self.positions[p1] - self.positions[out_1]).magnitude();
+
+                let angle_p0_out_1 = if (h_1 / p0_out_1).abs() > 1.0 {
+                    std::f32::consts::FRAC_PI_2 // 90 degrees
+                } else {
+                    (h_1 / p0_out_1).asin()
+                };
+                let angle_p1_out_1 = if (h_1 / p1_out_1).abs() > 1.0 {
+                    std::f32::consts::FRAC_PI_2 // 90 degrees
+                } else {
+                    (h_1 / p1_out_1).asin()
+                };
+
+                // The "edge" vector along the creased edge
+                let mut crease_vector = (self.positions[p1] - self.positions[p0]).normalize();
+                let mut dot_normals = n_0.dot(n_1);
+
+                // Clamp to range -1..1
+                dot_normals = dot_normals.min(1.0).max(-1.0);
+
+                // https://math.stackexchange.com/questions/47059/how-do-i-calculate-a-dihedral-angle-given-cartesian-coordinates
+                let mut dihedral = ((n_0.cross(crease_vector)).dot(n_1)).atan2(dot_normals);
+
+                let assignment = self.edge_data[edge_index].assignment;
+                let l_0 = self.edge_data[edge_index].nominal_length;
+                let fold_percent = 0.85;
+
+                let target_angle = self.edge_data[edge_index].target_angle * fold_percent;
+
+                let amount = match assignment {
+                    Assignment::M => {
+                        let k_crease = l_0 * self.params.k_fold;
+                        if dihedral > 0.0 {
+                            dihedral *= -1.0
+                        }
+                        -k_crease * (dihedral - target_angle)
+                    },
+                    Assignment::V => {
+                        let k_crease = l_0 * self.params.k_fold;
+                        if dihedral < 0.0 {
+                            dihedral *= -1.0;
+                        }
+                        -k_crease * (dihedral - target_angle)
+                    },
+                    Assignment::F => {
+                        let k_crease = l_0 * self.params.k_facet;
+                        -k_crease * (dihedral - target_angle)
+                    },
+                    _ => 0.0,
+                };
+
+                // Forces on the two "outer" points
+                self.forces[out_0] += amount * (n_0 / h_0);
+                self.forces[out_1] += amount * (n_1 / h_1);
+
+                // Forces on the first "hinge" joint, `p0`
+                let coeff1 = -cot(angle_p1_out_0) / (cot(angle_p0_out_0) + cot(angle_p1_out_0));
+                let coeff2 = -cot(angle_p1_out_1) / (cot(angle_p0_out_1) + cot(angle_p1_out_1));
+                self.forces[p0] += amount * (coeff1 * (n_0 / h_0) + coeff2 * (n_1 / h_1));
+
+                // Forces on the second "hinge" joint, `p1`
+                let coeff1 = -cot(angle_p0_out_0) / (cot(angle_p1_out_0) + cot(angle_p0_out_0));
+                let coeff2 = -cot(angle_p0_out_1) / (cot(angle_p1_out_1) + cot(angle_p0_out_1));
+                self.forces[p1] += amount * (coeff1 * (n_0 / h_0) + coeff2 * (n_1 / h_1));
+            }
+        }
     }
 
     fn apply_face_constraints(&mut self) {
-        unimplemented!();
+       
     }
 
     fn integrate(&mut self) {
@@ -491,25 +617,6 @@ impl Model {
     }
 
     fn update_mesh(&mut self) {
-//        // Update the vertices of the half-edge mesh
-//        assert_eq!(
-//            self.half_edge_mesh.get_vertices().len(),
-//            self.positions.len()
-//        );
-//        for (vertex, position) in self
-//            .half_edge_mesh
-//            .get_vertices_mut()
-//            .iter_mut()
-//            .zip(self.positions.iter())
-//        {
-//            vertex.set_coordinates(position);
-//        }
-//
-//        // Transfer triangles to GPU for rendering
-//        self.mesh_body
-//            .set_positions(&self.half_edge_mesh.gather_lines());
-//
-//
         // Transfer face data to GPU for rendering
         let mut normal_debug_lines = vec![];
         let length = 50.0;
@@ -519,12 +626,9 @@ impl Model {
         }
         self.mesh_debug.set_positions(&normal_debug_lines);
 
-        
-
         let mut line_positions = vec![];
         let mut colors = vec![];
         for (edge_indices, data) in self.edges.iter().zip(self.edge_data.iter()) {
-
             // Push back the two endpoints
             line_positions.push(self.positions[edge_indices[0]]);
             line_positions.push(self.positions[edge_indices[1]]);

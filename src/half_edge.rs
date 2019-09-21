@@ -744,16 +744,46 @@ mod tests {
         assert_eq!(None, half_edge_mesh.get_half_edge(HalfEdgeIndex(9)).face_id);
 
         // Test opposite vertices
-        assert_eq!(Some(VertexIndex(2)), half_edge_mesh.get_vertex_opposite_to_half_edge(HalfEdgeIndex(0)));
-        assert_eq!(Some(VertexIndex(0)), half_edge_mesh.get_vertex_opposite_to_half_edge(HalfEdgeIndex(1)));
-        assert_eq!(Some(VertexIndex(1)), half_edge_mesh.get_vertex_opposite_to_half_edge(HalfEdgeIndex(2)));
-        assert_eq!(Some(VertexIndex(3)), half_edge_mesh.get_vertex_opposite_to_half_edge(HalfEdgeIndex(3)));
-        assert_eq!(Some(VertexIndex(0)), half_edge_mesh.get_vertex_opposite_to_half_edge(HalfEdgeIndex(4)));
-        assert_eq!(Some(VertexIndex(2)), half_edge_mesh.get_vertex_opposite_to_half_edge(HalfEdgeIndex(5)));
-        assert_eq!(None, half_edge_mesh.get_vertex_opposite_to_half_edge(HalfEdgeIndex(6)));
-        assert_eq!(None, half_edge_mesh.get_vertex_opposite_to_half_edge(HalfEdgeIndex(7)));
-        assert_eq!(None, half_edge_mesh.get_vertex_opposite_to_half_edge(HalfEdgeIndex(8)));
-        assert_eq!(None, half_edge_mesh.get_vertex_opposite_to_half_edge(HalfEdgeIndex(9)));
+        assert_eq!(
+            Some(VertexIndex(2)),
+            half_edge_mesh.get_vertex_opposite_to_half_edge(HalfEdgeIndex(0))
+        );
+        assert_eq!(
+            Some(VertexIndex(0)),
+            half_edge_mesh.get_vertex_opposite_to_half_edge(HalfEdgeIndex(1))
+        );
+        assert_eq!(
+            Some(VertexIndex(1)),
+            half_edge_mesh.get_vertex_opposite_to_half_edge(HalfEdgeIndex(2))
+        );
+        assert_eq!(
+            Some(VertexIndex(3)),
+            half_edge_mesh.get_vertex_opposite_to_half_edge(HalfEdgeIndex(3))
+        );
+        assert_eq!(
+            Some(VertexIndex(0)),
+            half_edge_mesh.get_vertex_opposite_to_half_edge(HalfEdgeIndex(4))
+        );
+        assert_eq!(
+            Some(VertexIndex(2)),
+            half_edge_mesh.get_vertex_opposite_to_half_edge(HalfEdgeIndex(5))
+        );
+        assert_eq!(
+            None,
+            half_edge_mesh.get_vertex_opposite_to_half_edge(HalfEdgeIndex(6))
+        );
+        assert_eq!(
+            None,
+            half_edge_mesh.get_vertex_opposite_to_half_edge(HalfEdgeIndex(7))
+        );
+        assert_eq!(
+            None,
+            half_edge_mesh.get_vertex_opposite_to_half_edge(HalfEdgeIndex(8))
+        );
+        assert_eq!(
+            None,
+            half_edge_mesh.get_vertex_opposite_to_half_edge(HalfEdgeIndex(9))
+        );
 
         // Test gather methods
         println!("\n{:?}", half_edge_mesh.gather_triangles());
