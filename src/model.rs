@@ -3,6 +3,7 @@ use crate::fold_specification::FoldSpecification;
 use crate::graphics::mesh::Mesh;
 
 use cgmath::{InnerSpace, Vector3, Zero};
+
 use std::collections::{HashMap, HashSet};
 
 fn cot(x: f32) -> f32 {
@@ -11,6 +12,9 @@ fn cot(x: f32) -> f32 {
 
 #[derive(Clone, Copy, Debug)]
 struct SimulationParameters {
+    // How far the model should progress towards its target fold angles
+    fold_percent: f32,
+
     // The stiffness coefficient along facet creases
     k_facet: f32,
 
@@ -30,6 +34,7 @@ struct SimulationParameters {
 impl SimulationParameters {
     pub fn new() -> SimulationParameters {
         SimulationParameters {
+            fold_percent: 0.8,
             k_facet: 0.7,
             k_fold: 0.7,
             ea: 20.0,
@@ -181,9 +186,9 @@ pub struct Model {
 
 impl Model {
     pub fn from_specification(spec: &FoldSpecification, scale: f32) -> Model {
-        let mut base_vertices = vec![];
-        let mut base_edges = vec![];
-        let mut base_faces = vec![];
+        let mut vertices = vec![];
+        let mut edges = vec![];
+        let mut faces = vec![];
 
         let mut vertex_data = vec![];
         let mut edge_data = vec![];
@@ -195,7 +200,7 @@ impl Model {
         // Add vertices
         for vertex_coordinates in spec.vertices.iter() {
             assert_eq!(vertex_coordinates.len(), 3);
-            base_vertices.push(Vector3::new(
+            vertices.push(Vector3::new(
                 vertex_coordinates[0] * scale,
                 vertex_coordinates[1] * scale,
                 vertex_coordinates[2] * scale,
@@ -207,8 +212,8 @@ impl Model {
                 vertex_coordinates[2] * scale,
             )));
         }
-        assert_eq!(base_vertices.len(), spec.vertices.len());
-        assert_eq!(base_vertices.len(), vertex_data.len());
+        assert_eq!(vertices.len(), spec.vertices.len());
+        assert_eq!(vertices.len(), vertex_data.len());
 
         // TODO: calculate vertex masses and find the minimum
         // ...
@@ -218,7 +223,7 @@ impl Model {
         // Add edges
         for (edge_index, edge_indices) in spec.edges.iter().enumerate() {
             assert_eq!(edge_indices.len(), 2);
-            base_edges.push([edge_indices[0] as usize, edge_indices[1] as usize]);
+            edges.push([edge_indices[0] as usize, edge_indices[1] as usize]);
 
             // Find this edge's assignment
             let assignment_str = &spec.assignments[edge_index];
@@ -232,8 +237,8 @@ impl Model {
             };
 
             // Find this edge's nominal (starting) length
-            let v0 = base_vertices[edge_indices[0] as usize];
-            let v1 = base_vertices[edge_indices[1] as usize];
+            let v0 = vertices[edge_indices[0] as usize];
+            let v1 = vertices[edge_indices[1] as usize];
             let l_0 = (v0 - v1).magnitude();
             assert!(l_0.abs() > 0.0);
 
@@ -248,8 +253,8 @@ impl Model {
 
             edge_data.push(EdgeData::new(assignment, 0.0, target_angle, l_0, k_axial));
         }
-        assert_eq!(base_edges.len(), spec.edges.len());
-        assert_eq!(base_edges.len(), edge_data.len());
+        assert_eq!(edges.len(), spec.edges.len());
+        assert_eq!(edges.len(), edge_data.len());
 
         // Add faces
         for (face_index, face_indices) in spec.faces.iter().enumerate() {
@@ -258,7 +263,7 @@ impl Model {
                 panic!("Attempting to process facet with more than 3 vertices");
             }
             assert_eq!(face_indices.len(), 3);
-            base_faces.push([
+            faces.push([
                 face_indices[0] as usize,
                 face_indices[1] as usize,
                 face_indices[2] as usize,
@@ -266,13 +271,13 @@ impl Model {
 
             face_data.push(FaceData::new());
         }
-        assert_eq!(base_faces.len(), spec.faces.len());
-        assert_eq!(base_faces.len(), face_data.len());
+        assert_eq!(faces.len(), spec.faces.len());
+        assert_eq!(faces.len(), face_data.len());
 
         // Create neighborhood map, which tells us the indices of all of the vertices (the neighbors)
         // that surround each vertex
         let mut neighbors: HashMap<_, HashSet<_>> = HashMap::new();
-        for edge_indices in base_edges.iter() {
+        for edge_indices in edges.iter() {
             let (a, b) = (edge_indices[0], edge_indices[1]);
 
             if let Some(v) = neighbors.get_mut(&a) {
@@ -302,8 +307,8 @@ impl Model {
         // corresponding value.
         let mut opposites: HashMap<_, Vec<_>> = HashMap::new();
 
-        for (edge_index, edge_indices) in base_edges.iter().enumerate() {
-            for (face_index, face_indices) in base_faces.iter().enumerate() {
+        for (edge_index, edge_indices) in edges.iter().enumerate() {
+            for (face_index, face_indices) in faces.iter().enumerate() {
                 let edge_set: HashSet<usize> = edge_indices.iter().cloned().collect();
                 let face_set: HashSet<usize> = face_indices.iter().cloned().collect();
 
@@ -332,10 +337,10 @@ impl Model {
         // Gather data for mesh construction
         let mut line_positions = vec![];
         let mut colors = vec![];
-        for (edge_indices, data) in base_edges.iter().zip(edge_data.iter()) {
+        for (edge_indices, data) in edges.iter().zip(edge_data.iter()) {
             // Push back the two endpoints
-            line_positions.push(base_vertices[edge_indices[0]]);
-            line_positions.push(base_vertices[edge_indices[1]]);
+            line_positions.push(vertices[edge_indices[0]]);
+            line_positions.push(vertices[edge_indices[1]]);
 
             // Push back colors
             colors.push(data.assignment.get_color());
@@ -344,22 +349,17 @@ impl Model {
 
         // Construct a renderable, GPU mesh from the adjacency information provided by the half-edge mesh
         let mesh_body = Mesh::new(&line_positions, Some(&colors), None, None);
-        let mesh_debug = Mesh::new(
-            &vec![Vector3::zero(); base_faces.len() * 2],
-            None,
-            None,
-            None,
-        );
+        let mesh_debug = Mesh::new(&vec![Vector3::zero(); faces.len() * 2], None, None, None);
 
         // Calculate the timestep for the physics simulation
-        let timestep_reduction = 0.1;
+        let timestep_reduction = 0.5;
         let timestep = (1.0 / (2.0 * std::f32::consts::PI * omega_max)) * timestep_reduction;
         println!("Setting simulation timestep to {}\n", timestep);
 
         Model {
-            vertices: base_vertices,
-            faces: base_faces,
-            edges: base_edges,
+            vertices,
+            faces,
+            edges,
             vertex_data,
             edge_data,
             face_data,
@@ -440,10 +440,6 @@ impl Model {
             self.face_data[face_index].normal = normal;
             self.face_data[face_index].area = area;
             self.face_data[face_index].centroid = centroid;
-
-            // To draw the normals, create a line segment from `centroid` to the
-            // point `centroid + normal`
-            // ...
         }
     }
 
@@ -459,7 +455,8 @@ impl Model {
                 // The index of the edge above within the model's list of edges
                 let mut pos = self.find_edge_with_indices(&axial_indices).unwrap();
 
-                let mut direction = self.vertex_data[vertex_index].position - self.vertex_data[*neighbor_index].position;
+                let mut direction = self.vertex_data[vertex_index].position
+                    - self.vertex_data[*neighbor_index].position;
                 let l = direction.magnitude();
                 let l_0 = self.edge_data[pos].nominal_length;
                 let k_axial = self.params.ea / l_0;
@@ -469,9 +466,11 @@ impl Model {
                 force_axial += -k_axial * (l - l_0) * direction;
 
                 // Accumulate damping force
-                let c = 2.0 * self.params.zeta * (k_axial * self.vertex_data[vertex_index].mass).sqrt();
-                force_damping +=
-                    c * (self.vertex_data[*neighbor_index].velocity - self.vertex_data[vertex_index].velocity);
+                let c =
+                    2.0 * self.params.zeta * (k_axial * self.vertex_data[vertex_index].mass).sqrt();
+                force_damping += c
+                    * (self.vertex_data[*neighbor_index].velocity
+                        - self.vertex_data[vertex_index].velocity);
             }
 
             // Accumulate both forces calculated above in the inner for-loop
@@ -483,7 +482,6 @@ impl Model {
         for (edge_index, edge_indices) in self.edges.iter().enumerate() {
             // Don't process border edges, which only have a single face neighbor
             if self.opposites.get(&edge_index).unwrap().len() == 2 {
-
                 let opposite = self.opposites.get(&edge_index).unwrap();
 
                 // The indices of the two faces adjacent to this edge
@@ -515,13 +513,15 @@ impl Model {
                 let h_1 = 2.0 * (a_1 / b);
 
                 // Interior angles on triangle `face_0`
-                let p0_out_0 = (self.vertex_data[p0].position - self.vertex_data[out_0].position).magnitude();
-                let p1_out_0 = (self.vertex_data[p1].position - self.vertex_data[out_0].position).magnitude();
+                let p0_out_0 =
+                    (self.vertex_data[p0].position - self.vertex_data[out_0].position).magnitude();
+                let p1_out_0 =
+                    (self.vertex_data[p1].position - self.vertex_data[out_0].position).magnitude();
 
                 let angle_p0_out_0 = if (h_0 / p0_out_0).abs() > 1.0 {
                     std::f32::consts::FRAC_PI_2 // 90 degrees
                 } else {
-                   (h_0 / p0_out_0).asin()
+                    (h_0 / p0_out_0).asin()
                 };
                 let angle_p1_out_0 = if (h_0 / p1_out_0).abs() > 1.0 {
                     std::f32::consts::FRAC_PI_2 // 90 degrees
@@ -530,8 +530,10 @@ impl Model {
                 };
 
                 // Interior angles on triangle `face_1`
-                let p0_out_1 = (self.vertex_data[p0].position - self.vertex_data[out_1].position).magnitude();
-                let p1_out_1 = (self.vertex_data[p1].position - self.vertex_data[out_1].position).magnitude();
+                let p0_out_1 =
+                    (self.vertex_data[p0].position - self.vertex_data[out_1].position).magnitude();
+                let p1_out_1 =
+                    (self.vertex_data[p1].position - self.vertex_data[out_1].position).magnitude();
 
                 let angle_p0_out_1 = if (h_1 / p0_out_1).abs() > 1.0 {
                     std::f32::consts::FRAC_PI_2 // 90 degrees
@@ -545,7 +547,8 @@ impl Model {
                 };
 
                 // The "edge" vector along the creased edge
-                let mut crease_vector = (self.vertex_data[p1].position - self.vertex_data[p0].position).normalize();
+                let mut crease_vector =
+                    (self.vertex_data[p1].position - self.vertex_data[p0].position).normalize();
                 let mut dot_normals = n_0.dot(n_1);
 
                 // Clamp to range -1..1
@@ -556,9 +559,9 @@ impl Model {
 
                 let assignment = self.edge_data[edge_index].assignment;
                 let l_0 = self.edge_data[edge_index].nominal_length;
-                let fold_percent = 0.85;
 
-                let target_angle = self.edge_data[edge_index].target_angle * fold_percent;
+                let mut target_angle =
+                    self.edge_data[edge_index].target_angle * self.params.fold_percent;
 
                 // Figure out which way this hinge should fold
                 let amount = match assignment {
@@ -568,18 +571,22 @@ impl Model {
                             dihedral *= -1.0
                         }
                         -k_crease * (dihedral - target_angle)
-                    },
+                    }
                     Assignment::V => {
                         let k_crease = l_0 * self.params.k_fold;
+
+                        // TODO: this is the way it was in TouchDesigner?
+                        target_angle = std::f32::consts::FRAC_PI_2 * self.params.fold_percent;
+
                         if dihedral < 0.0 {
                             dihedral *= -1.0;
                         }
                         -k_crease * (dihedral - target_angle)
-                    },
+                    }
                     Assignment::F => {
                         let k_crease = l_0 * self.params.k_facet;
                         -k_crease * (dihedral - target_angle)
-                    },
+                    }
                     _ => 0.0,
                 };
 
@@ -590,19 +597,19 @@ impl Model {
                 // Forces on the first "hinge" joint, `p0`
                 let coeff_0 = -cot(angle_p1_out_0) / (cot(angle_p0_out_0) + cot(angle_p1_out_0));
                 let coeff_1 = -cot(angle_p1_out_1) / (cot(angle_p0_out_1) + cot(angle_p1_out_1));
-                self.vertex_data[p0].force += amount * (coeff_0 * (n_0 / h_0) + coeff_1 * (n_1 / h_1));
+                self.vertex_data[p0].force +=
+                    amount * (coeff_0 * (n_0 / h_0) + coeff_1 * (n_1 / h_1));
 
                 // Forces on the second "hinge" joint, `p1`
                 let coeff_0 = -cot(angle_p0_out_0) / (cot(angle_p1_out_0) + cot(angle_p0_out_0));
                 let coeff_1 = -cot(angle_p0_out_1) / (cot(angle_p1_out_1) + cot(angle_p0_out_1));
-                self.vertex_data[p1].force += amount * (coeff_0 * (n_0 / h_0) + coeff_1 * (n_1 / h_1));
+                self.vertex_data[p1].force +=
+                    amount * (coeff_0 * (n_0 / h_0) + coeff_1 * (n_1 / h_1));
             }
         }
     }
 
-    fn apply_face_constraints(&mut self) {
-
-    }
+    fn apply_face_constraints(&mut self) {}
 
     fn integrate(&mut self) {
         for vertex in self.vertex_data.iter_mut() {
