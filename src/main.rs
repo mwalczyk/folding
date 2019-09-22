@@ -3,6 +3,7 @@ extern crate gl;
 extern crate glutin;
 extern crate serde;
 
+mod assignment;
 mod fold_specification;
 mod graphics;
 mod half_edge;

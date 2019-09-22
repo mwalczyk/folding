@@ -1,49 +1,12 @@
+use crate::assignment::Assignment;
 use crate::fold_specification::FoldSpecification;
 use crate::graphics::mesh::Mesh;
-use crate::half_edge::{FaceIndex, HalfEdgeIndex, HalfEdgeMesh, VertexIndex};
 
 use cgmath::{InnerSpace, Vector3, Zero};
 use std::collections::{HashMap, HashSet};
 
-use std::str::FromStr;
-
-type Color = Vector3<f32>;
-
 fn cot(x: f32) -> f32 {
     1.0 / x.tan()
-}
-
-#[derive(Clone, Copy, Debug)]
-enum Assignment {
-    M,
-    V,
-    F,
-    B,
-}
-
-impl Assignment {
-    fn get_color(&self) -> Color {
-        match *self {
-            Assignment::M => Vector3::new(1.0, 0.0, 0.0),
-            Assignment::V => Vector3::new(0.0, 0.0, 1.0),
-            Assignment::F => Vector3::new(1.0, 1.0, 0.0),
-            Assignment::B => Vector3::new(0.0, 1.0, 0.0),
-        }
-    }
-}
-
-impl FromStr for Assignment {
-    type Err = ();
-
-    fn from_str(s: &str) -> Result<Assignment, ()> {
-        match s {
-            "M" => Ok(Assignment::M),
-            "V" => Ok(Assignment::V),
-            "F" => Ok(Assignment::F),
-            "B" => Ok(Assignment::B),
-            _ => Err(()),
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -73,6 +36,50 @@ impl SimulationParameters {
             zeta: 0.1,
             iterations: 1,
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct VertexData {
+    // The position of this vertex in 3-space
+    position: Vector3<f32>,
+
+    // The current velocity of this vertex
+    velocity: Vector3<f32>,
+
+    // The current acceleration of this vertex
+    acceleration: Vector3<f32>,
+
+    // The current cumulative forces acting on this vertex
+    force: Vector3<f32>,
+
+    // The mass of this vertex
+    mass: f32,
+}
+
+impl VertexData {
+    pub fn new(position: Vector3<f32>) -> VertexData {
+        VertexData {
+            position,
+            velocity: Vector3::zero(),
+            acceleration: Vector3::zero(),
+            force: Vector3::zero(),
+            mass: 1.0,
+        }
+    }
+
+    pub fn reset_force(&mut self) {
+        self.force = Vector3::zero();
+    }
+
+    pub fn integrate(&mut self, timestep: f32) {
+        self.acceleration = self.force / self.mass;
+        self.acceleration *= timestep;
+
+        self.velocity += self.acceleration;
+        self.velocity *= timestep;
+
+        self.position += self.velocity;
     }
 }
 
@@ -135,9 +142,17 @@ impl FaceData {
 }
 
 pub struct Model {
+    // The vertices of the model
     vertices: Vec<Vector3<f32>>,
+
+    // The faces of the model (each of which is an array of 3 vertex indices)
     faces: Vec<[usize; 3]>,
+
+    // The edges of the model (each of which is an array of 2 vertex indices)
     edges: Vec<[usize; 2]>,
+
+    // Data associated with each vertex (primarily attributes for the physics simulation)
+    vertex_data: Vec<VertexData>,
 
     // Data associated with each edge
     edge_data: Vec<EdgeData>,
@@ -145,30 +160,17 @@ pub struct Model {
     // Data associated with each face
     face_data: Vec<FaceData>,
 
+    // A map from vertex indices to other neighboring vertex indices
     neighbors: HashMap<usize, HashSet<usize>>,
 
+    // A map from edge indices to tuples of face indices / vertex indices
     opposites: HashMap<usize, Vec<(usize, usize)>>,
-
-    // The mass of each vertex of this model
-    masses: Vec<f32>,
 
     // Various parameters for the simulation (described above)
     params: SimulationParameters,
 
     // The simulation timestep
     timestep: f32,
-
-    // The forces acting on each vertex
-    forces: Vec<Vector3<f32>>,
-
-    // The position of each (dynamic) vertex
-    positions: Vec<Vector3<f32>>,
-
-    // The velocity of each (dynamic) vertex
-    velocities: Vec<Vector3<f32>>,
-
-    // The acceleration of each (dynamic) vertex
-    accelerations: Vec<Vector3<f32>>,
 
     // The render-able mesh
     mesh_body: Mesh,
@@ -182,6 +184,8 @@ impl Model {
         let mut base_vertices = vec![];
         let mut base_edges = vec![];
         let mut base_faces = vec![];
+
+        let mut vertex_data = vec![];
         let mut edge_data = vec![];
         let mut face_data = vec![];
 
@@ -196,8 +200,15 @@ impl Model {
                 vertex_coordinates[1] * scale,
                 vertex_coordinates[2] * scale,
             ));
+
+            vertex_data.push(VertexData::new(Vector3::new(
+                vertex_coordinates[0] * scale,
+                vertex_coordinates[1] * scale,
+                vertex_coordinates[2] * scale,
+            )));
         }
         assert_eq!(base_vertices.len(), spec.vertices.len());
+        assert_eq!(base_vertices.len(), vertex_data.len());
 
         // TODO: calculate vertex masses and find the minimum
         // ...
@@ -279,24 +290,25 @@ impl Model {
             }
         }
 
-        // Each entry looks like:
+        // Create an "opposites" map, which tells us the index of the vertex that is opposite to each
+        // edge (i.e. an altitude dropped from this vertex would intersect this edge). It also tells
+        // us the index of the face that contains both this edge and vertex.
+        //
+        // So, each entry looks like:
         //
         // edge_index: {(face_index, vertex_index), (face_index, vertex_index), ... }
+        //
+        // Since we are dealing with a triangular mesh, each edge key will have *at most* 2 entries in its
+        // corresponding value.
         let mut opposites: HashMap<_, Vec<_>> = HashMap::new();
 
         for (edge_index, edge_indices) in base_edges.iter().enumerate() {
-            println!("Examing edge #{}: {:?}", edge_index, edge_indices);
-
             for (face_index, face_indices) in base_faces.iter().enumerate() {
                 let edge_set: HashSet<usize> = edge_indices.iter().cloned().collect();
-                assert_eq!(edge_set.len(), 2);
                 let face_set: HashSet<usize> = face_indices.iter().cloned().collect();
-                assert_eq!(face_set.len(), 3);
 
                 // Is this edge part of this face?
                 if edge_set.is_subset(&face_set) {
-                    println!("\tEdge is part of face #{}: {:?}", face_index, face_indices);
-
                     // The difference should always yield a list with a single element
                     let difference: Vec<_> = face_set.difference(&edge_set).collect();
                     assert_eq!(difference.len(), 1);
@@ -316,8 +328,8 @@ impl Model {
                 }
             }
         }
-        println!("{:?}", opposites);
 
+        // Gather data for mesh construction
         let mut line_positions = vec![];
         let mut colors = vec![];
         for (edge_indices, data) in base_edges.iter().zip(edge_data.iter()) {
@@ -344,30 +356,17 @@ impl Model {
         let timestep = (1.0 / (2.0 * std::f32::consts::PI * omega_max)) * timestep_reduction;
         println!("Setting simulation timestep to {}\n", timestep);
 
-        let masses = vec![1.0; base_vertices.len()];
-        let forces = vec![Vector3::zero(); base_vertices.len()];
-        let mut positions = base_vertices.clone();
-        for p in positions.iter_mut() {
-            *p *= 1.4;
-        }
-        let velocities = vec![Vector3::zero(); base_vertices.len()];
-        let accelerations = vec![Vector3::zero(); base_vertices.len()];
-
         Model {
             vertices: base_vertices,
             faces: base_faces,
             edges: base_edges,
+            vertex_data,
             edge_data,
             face_data,
             neighbors,
             opposites,
-            masses,
             params,
             timestep,
-            forces,
-            positions,
-            velocities,
-            accelerations,
             mesh_body,
             mesh_debug,
         }
@@ -381,10 +380,28 @@ impl Model {
         self.mesh_debug.draw(gl::LINES);
     }
 
+    /// Returns the index of the edge whose corresponding vertex indices match `indices`. For example,
+    /// if we have the vertex indices `0` and `1`, we can use this function to find the edge that
+    /// connects `0` -> `1` (or `1` -> `0`). If such an edge is not found, `None` will be returned.
+    fn find_edge_with_indices(&self, indices: &[usize; 2]) -> Option<usize> {
+        for (edge_index, edge_indices) in self.edges.iter().enumerate() {
+            // We also need to check the indices in reverse order
+            let mut reversed = indices.clone();
+            reversed.reverse();
+
+            if *edge_indices == *indices || *edge_indices == reversed {
+                return Some(edge_index);
+            }
+        }
+        None
+    }
+
     pub fn step_simulation(&mut self) {
         for _ in 0..self.params.iterations {
             // Reset forces
-            self.forces = vec![Vector3::zero(); self.positions.len()];
+            for vertex in self.vertex_data.iter_mut() {
+                vertex.reset_force();
+            }
 
             // Calculate new face normals / areas
             self.update_face_data();
@@ -405,9 +422,9 @@ impl Model {
         for (face_index, face_indices) in self.faces.iter().enumerate() {
             // Remember that face indices are always stored in a CCW
             // winding order, as described in the .FOLD specification
-            let p0 = self.positions[face_indices[0]];
-            let p1 = self.positions[face_indices[1]];
-            let p2 = self.positions[face_indices[2]];
+            let p0 = self.vertex_data[face_indices[0]].position;
+            let p1 = self.vertex_data[face_indices[1]].position;
+            let p2 = self.vertex_data[face_indices[2]].position;
             let centroid = (p0 + p1 + p2) / 3.0;
 
             let mut u = p1 - p0;
@@ -431,7 +448,7 @@ impl Model {
     }
 
     fn apply_axial_constraints(&mut self) {
-        for (vertex_index, vertex) in self.positions.iter().enumerate() {
+        for vertex_index in 0..self.vertex_data.len() {
             let mut force_axial = Vector3::zero();
             let mut force_damping = Vector3::zero();
 
@@ -440,23 +457,9 @@ impl Model {
                 let axial_indices = [vertex_index, *neighbor_index];
 
                 // The index of the edge above within the model's list of edges
-                let mut pos = 0;
-                let mut found = false;
-                for (edge_index, edge_indices) in self.edges.iter().enumerate() {
-                    let mut rev = axial_indices.clone();
-                    rev.reverse();
+                let mut pos = self.find_edge_with_indices(&axial_indices).unwrap();
 
-                    if *edge_indices == axial_indices || *edge_indices == rev {
-                        pos = edge_index;
-                        found = true;
-                        break;
-                    }
-                }
-                if !found {
-                    panic!("Couldn't find matching edge");
-                }
-
-                let mut direction = *vertex - self.positions[*neighbor_index];
+                let mut direction = self.vertex_data[vertex_index].position - self.vertex_data[*neighbor_index].position;
                 let l = direction.magnitude();
                 let l_0 = self.edge_data[pos].nominal_length;
                 let k_axial = self.params.ea / l_0;
@@ -466,13 +469,13 @@ impl Model {
                 force_axial += -k_axial * (l - l_0) * direction;
 
                 // Accumulate damping force
-                let c = 2.0 * self.params.zeta * (k_axial * self.masses[vertex_index]).sqrt();
+                let c = 2.0 * self.params.zeta * (k_axial * self.vertex_data[vertex_index].mass).sqrt();
                 force_damping +=
-                    c * (self.velocities[*neighbor_index] - self.velocities[vertex_index]);
+                    c * (self.vertex_data[*neighbor_index].velocity - self.vertex_data[vertex_index].velocity);
             }
 
             // Accumulate both forces calculated above in the inner for-loop
-            self.forces[vertex_index] += force_axial + force_damping;
+            self.vertex_data[vertex_index].force += force_axial + force_damping;
         }
     }
 
@@ -497,7 +500,7 @@ impl Model {
                 let p1 = edge_indices[1];
 
                 // The base of each face triangle (the length of this crease)
-                let b = (self.positions[p0] - self.positions[p1]).magnitude();
+                let b = (self.vertex_data[p0].position - self.vertex_data[p1].position).magnitude();
 
                 // Grab the normal vectors of the two adjacent faces
                 let n_0 = self.face_data[face_0].normal;
@@ -512,8 +515,8 @@ impl Model {
                 let h_1 = 2.0 * (a_1 / b);
 
                 // Interior angles on triangle `face_0`
-                let p0_out_0 = (self.positions[p0] - self.positions[out_0]).magnitude();
-                let p1_out_0 = (self.positions[p1] - self.positions[out_0]).magnitude();
+                let p0_out_0 = (self.vertex_data[p0].position - self.vertex_data[out_0].position).magnitude();
+                let p1_out_0 = (self.vertex_data[p1].position - self.vertex_data[out_0].position).magnitude();
 
                 let angle_p0_out_0 = if (h_0 / p0_out_0).abs() > 1.0 {
                     std::f32::consts::FRAC_PI_2 // 90 degrees
@@ -527,8 +530,8 @@ impl Model {
                 };
 
                 // Interior angles on triangle `face_1`
-                let p0_out_1 = (self.positions[p0] - self.positions[out_1]).magnitude();
-                let p1_out_1 = (self.positions[p1] - self.positions[out_1]).magnitude();
+                let p0_out_1 = (self.vertex_data[p0].position - self.vertex_data[out_1].position).magnitude();
+                let p1_out_1 = (self.vertex_data[p1].position - self.vertex_data[out_1].position).magnitude();
 
                 let angle_p0_out_1 = if (h_1 / p0_out_1).abs() > 1.0 {
                     std::f32::consts::FRAC_PI_2 // 90 degrees
@@ -542,7 +545,7 @@ impl Model {
                 };
 
                 // The "edge" vector along the creased edge
-                let mut crease_vector = (self.positions[p1] - self.positions[p0]).normalize();
+                let mut crease_vector = (self.vertex_data[p1].position - self.vertex_data[p0].position).normalize();
                 let mut dot_normals = n_0.dot(n_1);
 
                 // Clamp to range -1..1
@@ -557,6 +560,7 @@ impl Model {
 
                 let target_angle = self.edge_data[edge_index].target_angle * fold_percent;
 
+                // Figure out which way this hinge should fold
                 let amount = match assignment {
                     Assignment::M => {
                         let k_crease = l_0 * self.params.k_fold;
@@ -580,39 +584,29 @@ impl Model {
                 };
 
                 // Forces on the two "outer" points
-                self.forces[out_0] += amount * (n_0 / h_0);
-                self.forces[out_1] += amount * (n_1 / h_1);
+                self.vertex_data[out_0].force += amount * (n_0 / h_0);
+                self.vertex_data[out_1].force += amount * (n_1 / h_1);
 
                 // Forces on the first "hinge" joint, `p0`
-                let coeff1 = -cot(angle_p1_out_0) / (cot(angle_p0_out_0) + cot(angle_p1_out_0));
-                let coeff2 = -cot(angle_p1_out_1) / (cot(angle_p0_out_1) + cot(angle_p1_out_1));
-                self.forces[p0] += amount * (coeff1 * (n_0 / h_0) + coeff2 * (n_1 / h_1));
+                let coeff_0 = -cot(angle_p1_out_0) / (cot(angle_p0_out_0) + cot(angle_p1_out_0));
+                let coeff_1 = -cot(angle_p1_out_1) / (cot(angle_p0_out_1) + cot(angle_p1_out_1));
+                self.vertex_data[p0].force += amount * (coeff_0 * (n_0 / h_0) + coeff_1 * (n_1 / h_1));
 
                 // Forces on the second "hinge" joint, `p1`
-                let coeff1 = -cot(angle_p0_out_0) / (cot(angle_p1_out_0) + cot(angle_p0_out_0));
-                let coeff2 = -cot(angle_p0_out_1) / (cot(angle_p1_out_1) + cot(angle_p0_out_1));
-                self.forces[p1] += amount * (coeff1 * (n_0 / h_0) + coeff2 * (n_1 / h_1));
+                let coeff_0 = -cot(angle_p0_out_0) / (cot(angle_p1_out_0) + cot(angle_p0_out_0));
+                let coeff_1 = -cot(angle_p0_out_1) / (cot(angle_p1_out_1) + cot(angle_p0_out_1));
+                self.vertex_data[p1].force += amount * (coeff_0 * (n_0 / h_0) + coeff_1 * (n_1 / h_1));
             }
         }
     }
 
     fn apply_face_constraints(&mut self) {
-       
+
     }
 
     fn integrate(&mut self) {
-        for (i, a) in self.accelerations.iter_mut().enumerate() {
-            *a = self.forces[i] / self.masses[i];
-            *a *= self.timestep;
-        }
-
-        for (i, v) in self.velocities.iter_mut().enumerate() {
-            *v += self.accelerations[i];
-            *v *= self.timestep;
-        }
-
-        for (i, p) in self.positions.iter_mut().enumerate() {
-            *p += self.velocities[i];
+        for vertex in self.vertex_data.iter_mut() {
+            vertex.integrate(self.timestep);
         }
     }
 
@@ -630,8 +624,8 @@ impl Model {
         let mut colors = vec![];
         for (edge_indices, data) in self.edges.iter().zip(self.edge_data.iter()) {
             // Push back the two endpoints
-            line_positions.push(self.positions[edge_indices[0]]);
-            line_positions.push(self.positions[edge_indices[1]]);
+            line_positions.push(self.vertex_data[edge_indices[0]].position);
+            line_positions.push(self.vertex_data[edge_indices[1]].position);
 
             // Push back colors
             colors.push(data.assignment.get_color());
