@@ -3,7 +3,7 @@ use gl;
 use gl::types::*;
 use std::mem;
 
-pub enum Attribute {
+enum Attribute {
     POSITIONS,
     COLORS,
     NORMALS,
@@ -39,14 +39,28 @@ impl Attribute {
     }
 }
 
+/// A simple implementation of a GPU-side mesh.
 #[derive(Default)]
 pub struct Mesh {
+    // The vertex array object (VAO)
     vao: u32,
+
+    // The vertex buffer object (VBO)
     vbo: u32,
+
+    // All of the vertex data packed into a single, CPU-side array
     vertex_data: Vec<f32>,
+
+    // The positions of the mesh
     positions: Vec<Vector3<f32>>,
+
+    // The colors of the mesh
     colors: Option<Vec<Vector3<f32>>>,
+
+    // The normals of the mesh
     normals: Option<Vec<Vector3<f32>>>,
+
+    // The UV-coordinates (texture coordinates) of the mesh
     texcoords: Option<Vec<Vector2<f32>>>,
 }
 
@@ -56,7 +70,7 @@ impl Mesh {
         colors: Option<&Vec<Vector3<f32>>>,
         normals: Option<&Vec<Vector3<f32>>>,
         texcoords: Option<&Vec<Vector2<f32>>>,
-    ) -> Mesh {
+    ) -> Result<Mesh, &'static str> {
         // TODO: this seems silly...glium just has a series of bools like `has_colors`
         let colors = match colors {
             Some(data) => Some(data.clone()),
@@ -83,8 +97,8 @@ impl Mesh {
             texcoords,
         };
 
-        mesh.allocate();
-        mesh
+        mesh.allocate()?;
+        Ok(mesh)
     }
 
     /// Allocates all OpenGL objects necessary for rendering this mesh.
@@ -233,7 +247,7 @@ impl Mesh {
         if size_changed {
             // The `generate_vertex_data()` function will be called automatically inside of `allocate()`,
             // so no need to do that again here...
-            self.allocate();
+            self.allocate().unwrap();
         } else {
             self.generate_vertex_data();
             self.upload_vertex_data();
@@ -248,7 +262,7 @@ impl Mesh {
             self.enable_attribute(Attribute::COLORS);
 
             self.colors = Some(colors.clone());
-            self.allocate();
+            self.allocate().unwrap();
         } else {
             self.colors = Some(colors.clone());
             self.generate_vertex_data();
@@ -264,7 +278,7 @@ impl Mesh {
             self.enable_attribute(Attribute::NORMALS);
 
             self.normals = Some(normals.clone());
-            self.allocate();
+            self.allocate().unwrap();
         } else {
             self.normals = Some(normals.clone());
             self.generate_vertex_data();
@@ -280,7 +294,7 @@ impl Mesh {
             self.enable_attribute(Attribute::TEXCOORDS);
 
             self.texcoords = Some(texcoords.clone());
-            self.allocate();
+            self.allocate().unwrap();
         } else {
             self.texcoords = Some(texcoords.clone());
             self.generate_vertex_data();

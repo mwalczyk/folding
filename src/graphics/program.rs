@@ -1,17 +1,10 @@
+use cgmath::{Array, Matrix};
 use gl;
 use gl::types::*;
-
-use cgmath;
-use cgmath::{Array, Matrix};
 
 use std::ffi::CString;
 use std::ptr;
 use std::str;
-
-pub struct UniformEntry {
-    name: String,
-    location: GLint,
-}
 
 pub struct Program {
     id: GLuint,

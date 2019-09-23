@@ -15,8 +15,6 @@ uniform mat4 u_model;
 uniform mat4 u_view;
 uniform mat4 u_projection;
 
-const float pi = 3.1415926535897932384626433832795;
-
 void main()
 {
     vs_out.color = color;

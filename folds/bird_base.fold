@@ -2,7 +2,7 @@
   "file_spec": 1,
   "file_creator": "Origami Simulator: http://git.amandaghassaei.com/OrigamiSimulator/",
   "file_author": "",
-  "frame_title": "birdBase : 0PercentFolded",
+  "frame_title": "birdBase",
   "frame_classes": [
     "singleModel"
   ],
@@ -304,14 +304,14 @@
     ]
   ],
   "edges_foldAngles": [
-    10.0,
-    10.0,
-    10.0,
-    10.0,
-    10.0,
-    10.0,
-    10.0,
-    10.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
     -3.141592653589793,
     -3.141592653589793,
     -3.141592653589793,
