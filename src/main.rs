@@ -3,13 +3,10 @@ mod assignment;
 mod constants;
 mod data;
 mod fold_specification;
-mod graphics;
 mod interaction;
 mod model;
 
 use crate::fold_specification::FoldSpecification;
-use crate::graphics::program::Program;
-use crate::graphics::utils;
 use crate::interaction::InteractionState;
 use crate::model::Model;
 
@@ -19,6 +16,9 @@ use glutin::event::{ElementState, Event, WindowEvent};
 use glutin::event_loop::{ControlFlow, EventLoop};
 use glutin::window::WindowBuilder;
 use glutin::ContextBuilder;
+
+use graphics_utils::program::Program;
+use graphics_utils::utils;
 use std::path::Path;
 
 /// Sets the draw state (enables depth testing, etc.)

@@ -1,9 +1,9 @@
 use crate::assignment::Assignment;
 use crate::data::{EdgeData, FaceData, VertexData};
 use crate::fold_specification::FoldSpecification;
-use crate::graphics::mesh::Mesh;
 
 use cgmath::{InnerSpace, Vector3, Zero};
+use graphics_utils::mesh::Mesh;
 
 use std::collections::{HashMap, HashSet};
 
