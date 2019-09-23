@@ -38,7 +38,7 @@ pub struct FoldSpecification {
     #[serde(rename(deserialize = "faces_vertices"))]
     pub faces: Vec<Vec<i32>>,
 
-    // Renamed and removed all occurrences of `null` -> replaced with `10.0`
+    // Renamed and removed all occurrences of `null`
     #[serde(rename(deserialize = "edges_foldAngles"))]
     pub fold_angles: Vec<f32>,
 }
@@ -49,8 +49,6 @@ impl FoldSpecification {
         let mut contents = String::new();
         file.read_to_string(&mut contents)?;
 
-        let spec: FoldSpecification = serde_json::from_str(&contents).expect("Failed to load JSON");
-
-        Ok(spec)
+        Ok(serde_json::from_str(&contents).expect("Failed to load JSON"))
     }
 }

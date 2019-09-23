@@ -59,6 +59,12 @@ fn main() {
     )
     .unwrap();
 
+    // Load the origami model
+    let spec = FoldSpecification::from_file(Path::new("folds/bird_base.fold")).unwrap();
+    let mut fold = Model::from_specification(&spec, 1000.0).unwrap();
+
+    let bounds = fold.get_mesh().get_bounds();
+
     // Set up the model-view-projection (MVP) matrices
     let mut model = Matrix4::identity();
     let view = Matrix4::look_at(
@@ -82,10 +88,6 @@ fn main() {
     draw_program.uniform_matrix_4f("u_view", &view);
     draw_program.uniform_matrix_4f("u_projection", &projection);
 
-    // Load the origami model
-    let spec = FoldSpecification::from_file(Path::new("folds/bird_base.fold")).unwrap();
-    let mut fold = Model::from_specification(&spec, 1000.0).unwrap();
-
     // Main rendering loop
     el.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Poll;
@@ -93,7 +95,7 @@ fn main() {
         clear_screen();
         draw_program.uniform_matrix_4f("u_model", &model);
         fold.step_simulation();
-        fold.draw_mesh();
+        fold.draw_body();
         fold.draw_normals();
         gl_window.swap_buffers().unwrap();
 

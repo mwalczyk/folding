@@ -284,7 +284,11 @@ impl Model {
         })
     }
 
-    pub fn draw_mesh(&mut self) {
+    pub fn get_mesh(&self) -> &Mesh {
+        &self.mesh_body
+    }
+
+    pub fn draw_body(&mut self) {
         self.mesh_body.draw(gl::LINES);
     }
 

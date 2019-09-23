@@ -1,4 +1,4 @@
-use cgmath::{Vector2, Vector3};
+use cgmath::{Vector2, Vector3, Zero};
 use gl;
 use gl::types::*;
 use std::mem;
@@ -99,6 +99,47 @@ impl Mesh {
 
         mesh.allocate()?;
         Ok(mesh)
+    }
+
+    /// Returns the bounds of this mesh. In particular, it returns a tuple
+    /// with 3 elements:
+    ///
+    /// 1. The minimum point of the mesh (along each axis)
+    /// 2. The maximum point of the mesh (along each axis)
+    /// 3. The centroid of the mesh
+    pub fn get_bounds(&self) -> (Vector3<f32>, Vector3<f32>, Vector3<f32>){
+
+        let mut min = Vector3::zero();
+        let mut max = Vector3::zero();
+        let mut centroid = Vector3::zero();
+
+        for position in self.positions.iter() {
+            if position.x < min.x {
+                min.x = position.x;
+            }
+            if position.y < min.y {
+                min.y = position.y;
+            }
+            if position.z < min.z {
+                min.z = position.z;
+            }
+
+            if position.x > max.x {
+                max.x = position.x;
+            }
+            if position.y > max.y {
+                max.y = position.y;
+            }
+            if position.z > max.z {
+                max.z = position.z;
+            }
+
+            centroid += *position;
+        }
+
+        centroid /= self.get_number_of_vertices() as f32;
+
+        (min, max, centroid)
     }
 
     /// Allocates all OpenGL objects necessary for rendering this mesh.
