@@ -5,6 +5,7 @@ mod data;
 mod fold_specification;
 mod interaction;
 mod model;
+mod pattern;
 
 use crate::fold_specification::FoldSpecification;
 use crate::interaction::InteractionState;
@@ -60,7 +61,7 @@ fn main() {
     .unwrap();
 
     // Load the origami model
-    let spec = FoldSpecification::from_file(Path::new("folds/bird_base.fold")).unwrap();
+    let spec = FoldSpecification::from_file(Path::new("folds/sgmo.fold")).unwrap();
     let mut fold = Model::from_specification(&spec, 1000.0).unwrap();
 
     let bounds = fold.get_mesh().get_bounds();

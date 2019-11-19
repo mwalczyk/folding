@@ -264,7 +264,7 @@ impl Model {
             Mesh::new(&vec![Vector3::zero(); faces.len() * 2], None, None, None).unwrap();
 
         // Calculate the timestep for the physics simulation
-        let timestep_reduction = 0.5;
+        let timestep_reduction = 0.2;
         let timestep = (1.0 / (2.0 * std::f32::consts::PI * omega_max)) * timestep_reduction;
         println!("Setting simulation timestep to {}\n", timestep);
 
